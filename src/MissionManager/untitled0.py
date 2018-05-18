@@ -15,6 +15,7 @@ from geometry_msgs.msg import PoseStamped
 from geographic_msgs.msg import GeoPointStamped
 from std_msgs.msg import String
 from project11_transformations.srv import LatLongToEarth
+import math
 
 class MissMan_Node():
     
@@ -24,6 +25,14 @@ class MissMan_Node():
         rospy.init_node('MissionManager')
         self.Mission = MissionPlan.missionplan.Mission()
         #print self.Mission;
+        
+        # Variable for waypoint
+        self.waypoint = PointStamped()   
+        
+        # Variable for current position of boat--to be set in position_callback
+        self.currPosBoat_LatLon = GeoPointStamped()
+        self.currPosBoat_ECEF = PointStamped()
+        self.currPosBoat_Map = PointStamped()
         
         # Set minimum distance to waypoint
         self.threshold = 3.0
@@ -45,13 +54,21 @@ class MissMan_Node():
         pass
     
     def position_callback(self, position_msg):
+        # Save lat/lon coordinates
+        self.currPosBoat_LatLon = position_msg        
+        
         # Use Roland's service (in lat_long_to_ecef) 
         # to convert to earth-centered, earth-fixed.
         # Converts GeoPointStamped to PointStamped
 
-        ecef = self.lat_long_to_ecef(position_msg)
-        self.ecef_x = ecef.earth.point.x
-        self.ecef_y = ecef.earth.point.y
+        self.currPosBoat_ECEF = self.lat_long_to_ecef(position_msg)
+        
+        # Convert from geometry msgs PointStamped (ECEF) to TF2 PointStamped (ECEF)
+        # tempTF2_PointStamped = self.convertToTF2PointStamped(self.currPosBoat_ECEF)
+        # NOTE: convertToMapCoordinates will call convertToTF2PointStamped
+        
+        # Convert from TF2 PointStamped (ECEF) to geometry msgs  PointStamped (Map Coordinates)
+        self.currPosBoat_Map = self.convertToMapCoordinates(self.currPosBoat_ECEF)
         
             
     def lat_long_to_ecef(self, geo_point_stamped):
@@ -190,8 +207,8 @@ class MissMan_Node():
         new.point.y = old.earth.point.y
         new.point.z = old.earth.point.z
         
-        print "*******************TYPE********************"
-        print type(new)
+        #print "*******************TYPE********************"
+        #print type(new)
         return new
         
         
@@ -201,23 +218,22 @@ class MissMan_Node():
         buffer = tf2_ros.Buffer()
         listener = tf2_ros.TransformListener(buffer)
         
-        
+        # This step is necessary to wait until transform becomes available
         while not buffer.can_transform('map', 'earth', rospy.Time(0)):
             print "Cannot transform yet!"
             rospy.sleep(0.5)
-                
-        #mapp = buffer.transform(self.convertToTF2PointStamped(ecef), "map")
-        mapp = buffer.transform(ecef, "map")
+        
+        map = buffer.transform(self.convertToTF2PointStamped(ecef), "map")
+        #mapp = buffer.transform(ecef, "map")
         #except:
         
-        print 'ecef'
-        print ecef
-        print 'mapp'
-        print mapp
+        #print 'ecef'
+        #print ecef
+        #print 'mapp'
+        #print mapp
+        #print "type(map)", type(map)
+        return map        
         
-        
-        
-        pass
     
     
     def setNextWaypoint(self, waypoint):
@@ -225,13 +241,23 @@ class MissMan_Node():
         topic: /moos/wpt_updates
         String: points=x1,y1:x2,y2
         '''
-        #a = "points = %f,%f"%waypoint.
-        #self.wpt_updates.publish(a)
-        pass
+        point = "points = %f, %f"%(waypoint.point.x, waypoint.point.y)
+        self.wpt_updates.publish(point)
+        
     
     def getDistanceToNextWaypoint(self):
         #Must subscribe to current position updates to determine
-        pass
+        boat_x = self.currPosBoat_Map.point.x
+        boat_y = self.currPosBoat_Map.point.y
+        
+        waypoint_x = self.waypoint.point.x
+        waypoint_y = self.waypoint.point.y
+        
+        distance = math.sqrt((boat_x - waypoint_x)**2 + (boat_y - waypoint_y)**2)
+        
+        #print "distance: ", distance
+        return distance
+        
     
     def getTimeToNextWaypoint(self):
         #Must subscribe to current position and speed to determine
@@ -290,16 +316,27 @@ class MissMan_Node():
            
             #self.convertToTF2PointStamped(self.lat_long_to_ecef(position))           
            
-            self.convertToMapCoordinates(self.lat_long_to_ecef(position))
+            map = self.convertToMapCoordinates(self.lat_long_to_ecef(position))
+            print "map", map
+            self.waypoint = map
             
-            # I think I need to convert the waypoint ("position")
-            # to robot coordinates before sending to boat
-            self.setNextWaypoint(position)
+            self.setNextWaypoint(map)
             
             while self.getDistanceToNextWaypoint() > self.threshold:            
                 # Report distance and time to waypoint.
                 rospy.logout(self.getDistanceToNextWaypoint())            
-                rospy.logou(self.getTimeToNextWaypoint())
+                rospy.logout(self.getTimeToNextWaypoint())
+                
+                print "type(self.currPosBoat_ECEF): ", type(self.currPosBoat_ECEF)
+                print "self.currPosBoat_Map X", self.currPosBoat_Map.point.x
+                print "self.currPosBoat_Map Y", self.currPosBoat_Map.point.y
+                print "self.currPosBoat_Lat", self.currPosBoat_LatLon.position.latitude
+                print "self.currPosBoat_Lon", self.currPosBoat_LatLon.position.longitude
+                print "self.currPosBot_ECEF X", self.currPosBoat_ECEF.point.x
+                print "self.currPosBot_ECEF Y", self.currPosBoat_ECEF.point.y
+                print "self.currPosBot_ECEF Z", self.currPosBoat_ECEF.point.z
+                print "self.waypoint X", self.waypoint.point.x
+                print "self.waypoint Y", self.waypoint.point.y
                 
                 rospy.sleep(1)
             
