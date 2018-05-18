@@ -275,7 +275,7 @@ class MissMan_Node():
     def run(self):
         #Read mission plan output by missionplan.py
         #This is only a sample mission plan and will need to be replaced
-        self.readMission('/home/monster-kitty/project11/catkin_ws/src/mission-plan/src/MissionPlan/mission.txt')
+        self.readMission('/home/field/project11/catkin_ws/src/missionmanager/mission.txt')
         
         #For testing only!        
         #self.Mission in this test is default missionplan.py output        
@@ -332,9 +332,9 @@ class MissMan_Node():
                 print "self.currPosBoat_Map Y", self.currPosBoat_Map.point.y
                 print "self.currPosBoat_Lat", self.currPosBoat_LatLon.position.latitude
                 print "self.currPosBoat_Lon", self.currPosBoat_LatLon.position.longitude
-                print "self.currPosBot_ECEF X", self.currPosBoat_ECEF.point.x
-                print "self.currPosBot_ECEF Y", self.currPosBoat_ECEF.point.y
-                print "self.currPosBot_ECEF Z", self.currPosBoat_ECEF.point.z
+                print "self.currPosBot_ECEF X", self.convertToTF2PointStamped(self.currPosBoat_ECEF)
+                #print "self.currPosBot_ECEF Y", self.convertToTF2PointStamped(self.currPosBoat_ECEF)
+                #print "self.currPosBot_ECEF Z", self.convertToTF2PointStamped(self.currPosBoat_ECEF)
                 print "self.waypoint X", self.waypoint.point.x
                 print "self.waypoint Y", self.waypoint.point.y
                 
