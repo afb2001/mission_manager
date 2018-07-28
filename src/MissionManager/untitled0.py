@@ -35,7 +35,7 @@ class MissMan_Node():
         self.currPosBoat_Map = PointStamped()
         
         # Set minimum distance to waypoint
-        self.threshold = 3.0
+        self.threshold = 10.0
         
         # Receive up-to-date UTM coordinates of boat
         rospy.Subscriber('/position_utm', PoseStamped, self.position_utm_callback, queue_size = 1)
