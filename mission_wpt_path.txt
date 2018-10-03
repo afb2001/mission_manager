@@ -1,0 +1,91 @@
+{
+    "DEFAULT_PARAMETERS": {
+        "behaviors": {
+            "collision_avoidance": {
+                "Active": false, 
+                "Enabled": true, 
+                "maxrange_m": 100.0, 
+                "minimumdistance_m": 2.0
+            }
+        }, 
+        "defaultspeed_ms": 2.0, 
+        "maximumdepth_m": 2.0, 
+        "minimumdepth_m": 2.0, 
+        "vessellength_m": 4.0, 
+        "vesselwidth_m": 1.4
+    }, 
+    "NAVIGATION": [
+        {
+            "waypoint": {
+                "behaviors": {
+                    "collision_avoidance": {
+                        "Active": false, 
+                        "Enabled": true, 
+                        "maxrange_m": 100.0, 
+                        "minimumdistance_m": 5.0
+                    }
+                }, 
+                "nav": {
+                    "orientation": {
+                        "heading": null, 
+                        "pitch": null, 
+                        "roll": null
+                    }, 
+                    "position": {
+                        "altitude": null, 
+                        "latitude": 43.07338970, 
+                        "longitude": -70.71056046
+                    }
+                }
+            }
+        }, 
+        {
+            "path": {
+                "nav": [
+                    {
+                        "waypoint": {
+                            "behaviors": {
+                                "dont_run_aground_ben": {
+                                    "Active": false, 
+                                    "Enabled": true, 
+                                    "maxrange_m": 100.0, 
+                                    "minimumdistance_m": 5.0
+                                }
+                            }, 
+                            "nav": {
+                                "orientation": {
+                                    "heading": null, 
+                                    "pitch": null, 
+                                    "roll": null
+                                }, 
+                                "position": {
+                                    "altitude": null, 
+                                    "latitude": 43.07330932, 
+                        	    "longitude": -70.70771000
+                                }
+                            }
+                        }
+                    }, 
+                    {
+                        "waypoint": {
+                            "behaviors": {}, 
+                            "nav": {
+                                "orientation": {
+                                    "heading": null, 
+                                    "pitch": null, 
+                                    "roll": null
+                                }, 
+                                "position": {
+                                    "altitude": null, 
+                                    "latitude": 43.07271112, 
+                        	    "longitude": -70.70929358
+                                }
+                            }
+                        }
+                    }
+                ], 
+                "parameters": {}
+            }
+        }
+    ]
+}

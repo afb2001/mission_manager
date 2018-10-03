@@ -16,29 +16,22 @@ This is a temporary script file.
 # University of New Hampshire
 # Copyright 2017, All rights reserved.
 
-import MissionManager.MissionManager
-import MissionManager.untitled0
-import MissionManager.untitled1
-import MissionManager.untitled2
-import MissionManager.MissionReader
+#import MissionManager.MissionManager
+#import MissionManager.untitled0
+#import MissionManager.MissionReader
 import MissionManager.DontRunAgroundBen
 import rospy
-from asv_msgs.msg import Depth
+#from asv_msgs.msg import Depth
 
 if __name__ == '__main__':
     
-    a = MissionManager.missionmanager_v0.MissMan_Node()
-    b = MissionManager.missionmanager_v1.MissMan_Node()
-    c = MissionManager.missionmanager_v2.MissMan_Node()
-    
+    c = MissionManager.DontRunAgroundBen.DontRunAgroundBen()
     
     while not rospy.is_shutdown():
         try:
-            #a.runOnce()
-            #b.runOnce()
-            c.runOnce()
-            
+            c.dontRunAgroundBen()	    
+           
         except rospy.ROSInterruptException:
             print "Error of unknown origin."
             pass
-    
+        
