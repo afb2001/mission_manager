@@ -133,7 +133,7 @@ class MissMan_Node():
         
     def headToYaw(self, heading):
         '''Helper method to convert heading (0 degrees north, + rotation clockwise)
-        to yaw (0 degrees east, + rotation coutner-clockwise)'''
+        to yaw (0 degrees east, + rotation counter-clockwise)'''
        
         if type(heading) == int \
         or type(heading) == float \
