@@ -17,7 +17,7 @@ from std_msgs.msg import String
 from project11_transformations.srv import LatLongToEarth
 import math
 
-class MissMan_Node():
+class MissionManager_Node():
     
     
     
@@ -273,18 +273,7 @@ class MissMan_Node():
         pass
     
     def run(self):
-        #Read mission plan output by missionplan.py
-        #This is only a sample mission plan and will need to be replaced
-        self.readMission('/home/field/project11/catkin_ws/src/missionmanager/mission.txt')
-        
-        #For testing only!        
-        #self.Mission in this test is default missionplan.py output        
-        #print self.Mission;
-        
-        #For testing only!
-        #In default mission plan, len(self.Mission.plan["NAVIGATION"]) is 2
-        #One for waypoint; one for path
-        #print len(self.Mission.plan["NAVIGATION"])
+
         
         #For each item in NAVIGATION:
         for x in range(0, len(self.Mission.plan["NAVIGATION"])):
