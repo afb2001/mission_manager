@@ -7,17 +7,15 @@ Created on Mon Nov 20 12:26:52 2017
 
 import rospy
 import json
-from missionmanager.msg import BehaviorControl
+from mission_manager.msg import BehaviorControl
 from std_msgs.msg import String, Float32, Int32, Bool
-# TODO: Is current /depth message type wrong?
-from asv_msgs.msg import Depth
 
 
-class DontRunAgroundBen():
+class DontRunAground_Node():
     
     def __init__(self, default = True):
         
-        rospy.init_node("DontRunAgroundBen")
+        rospy.init_node("DontRunAground")
         
         #print "**DON'T RUN AGROUND, BEN behavior is active.**"
         
@@ -80,7 +78,7 @@ class DontRunAgroundBen():
         self.depth = depth_msg.data
     
 
-    def dontRunAgroundBen(self):
+    def run(self):
         '''
         Implements "Don't Run Aground, Ben!" behavior. Utilizes /depth topic to compare with
         minDepth. If current depth is less than minDepth, return WARNING to mission manager.
