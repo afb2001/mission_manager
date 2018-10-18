@@ -7,7 +7,7 @@ Created on Mon Nov 20 12:26:52 2017
 
 import rospy
 import json
-import MissionPlan.missionplan
+import mission_plan.missionplan
 import MissionReader
 import DontRunAground
 import geodesy.utm
@@ -29,7 +29,7 @@ class MissionManager_Node():
         rospy.init_node('MissionManager')
         
         # This will be used to read mission.txt file later...
-        self.Mission = MissionPlan.missionplan.Mission()
+        self.Mission = mission_plan.missionplan.Mission()
         self.missionReader = MissionReader.MissionReader()
         
         # Variable for waypoint - in map / robot coordinates

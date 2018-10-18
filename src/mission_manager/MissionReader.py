@@ -13,7 +13,7 @@ waypoint-associated behaviors.
 
 import rospy
 import json
-import MissionPlan.missionplan
+import mission_plan.missionplan
 import tf2_ros
 from tf2_geometry_msgs import PointStamped
 from geographic_msgs.msg import GeoPointStamped
@@ -28,7 +28,7 @@ class MissionReader():
         # Create instance of missionplan
         # Used to read mission.txt file or /mission_plan subscriber...
         # And store mission plan.
-        self.Mission = MissionPlan.missionplan.Mission()
+        self.Mission = mission_plan.missionplan.Mission()
         self.missionPlanData = False
         
         # Array to contain waypoints and behaviors.
