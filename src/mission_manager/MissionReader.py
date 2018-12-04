@@ -165,12 +165,12 @@ class MissionReader():
                     
 # # # # # # # # # # # # # # TODO: DUMMY TO BE REPLACED # # # # # # # # # # # # # # # #
                   
-            dummy = '/home/monster-kitty/project11/catkin_ws/src/missionmanager/dummyDontRunAground.txt'
-            with open(dummy,'r') as infile:            
-                tempDefault = json.load(infile)
-            if tempDefault.has_key("DEFAULT_PARAMETERS"):
-                if tempDefault["DEFAULT_PARAMETERS"].has_key("behaviors"):
-                    defaultBehaviorArray.insert(0, tempDefault["DEFAULT_PARAMETERS"]["behaviors"])
+            #dummy = '/home/monster-kitty/project11/catkin_ws/src/missionmanager/dummyDontRunAground.txt'
+            #with open(dummy,'r') as infile:            
+            #    tempDefault = json.load(infile)
+            #if tempDefault.has_key("DEFAULT_PARAMETERS"):
+            #    if tempDefault["DEFAULT_PARAMETERS"].has_key("behaviors"):
+            #        defaultBehaviorArray.insert(0, tempDefault["DEFAULT_PARAMETERS"]["behaviors"])
             
 # # # # # # # # # # # # # # DUMMY TO BE REPLACED - END # # # # # # # # # # # # # # # # 
             
@@ -225,6 +225,27 @@ class MissionReader():
                                 wptBehaviors = path["nav"][y]["waypoint"]["behaviors"]
                             
                             wpt = path["nav"][y]["waypoint"]
+                            # GeoPointStamped message with waypoint latitude, longitude, and altitude
+                            position = self.extractPosition(wpt)
+                            waypoint = self.convertToMapCoordinates(self.lat_long_to_ecef(position))
+                            waypointArray = [waypoint.point.x, waypoint.point.y]
+                            
+                            wptBehaviorPairs = [waypointArray, wptBehaviors]
+                            typeArray.append(wptBehaviorPairs)
+                    masterWaypointAndBehaviorArray.append(typeArray)
+
+                elif mpNavigation[x].has_key("area"):
+                    area = mpNavigation[x]["area"]
+                    for n in area['nav']:
+                        if n.has_key("waypoint"):
+                            
+                            wptBehaviors = []
+                            # TODO: Extract waypoint-specific behaviors and create array
+                            # TODO: Double check that this generates an array... I think it does...
+                            if n["waypoint"].has_key("behaviors"):
+                                wptBehaviors = n["waypoint"]["behaviors"]
+                            
+                            wpt = n["waypoint"]
                             # GeoPointStamped message with waypoint latitude, longitude, and altitude
                             position = self.extractPosition(wpt)
                             waypoint = self.convertToMapCoordinates(self.lat_long_to_ecef(position))
