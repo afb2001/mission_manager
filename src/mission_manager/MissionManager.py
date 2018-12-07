@@ -43,6 +43,7 @@ class MissionManager_Node():
         rospy.Subscriber('/heading', NavEulerStamped, self.heading_callback, queue_size = 1)
         rospy.Subscriber('/depth', Float32, self.depth_callback, queue_size = 1)
         rospy.Subscriber('/mission_plan', String, self.missionPlanCallback, queue_size = 1)
+        rospy.Subscriber('/helm_mode', String, self.helmModeCallback, queue_size = 1)
         
         self.current_path_publisher = rospy.Publisher('/project11/mission_manager/current_path', GeoPath, queue_size = 10)
         self.crosstrack_error_publisher = rospy.Publisher('/project11/mission_manager/crosstrack_error', Float32, queue_size = 10)
@@ -57,6 +58,7 @@ class MissionManager_Node():
         self.current_nav_objective_index = None
         self.current_segment = None
         self.state = 'idle'
+        self.helm_mode = 'unknown'
    
     def heading_callback(self, heading_msg):
         self.heading = heading_msg
@@ -66,6 +68,9 @@ class MissionManager_Node():
         
     def depth_callback(self, depth_msg):
         self.depth = depth_msg
+        
+    def helmModeCallback(self, msg):
+        self.helm_mode = msg.data
             
     def readMission(self, filename): 
         '''Read mission file and make list of nav objectives'''
@@ -97,58 +102,67 @@ class MissionManager_Node():
             self.state = 'idle'
 
     def checkObjective(self):
-        if self.state == 'transit':
-            d = self.getDistanceToNextWaypoint()
-            #print d
-            if d is not None and d['distance_to_waypoint'] < self.waypointThreshold or (1-d['progress'])*d['path_distance'] < self.waypointThreshold:
-                self.current_transit_path_index += 1
-                if self.current_transit_path_index >= len(self.current_transit_path)-1:
-                    self.current_segment = ((self.nav_objectives[self.current_nav_objective_index]['nav'][0]['position']['latitude'],
-                                             self.nav_objectives[self.current_nav_objective_index]['nav'][0]['position']['longitude']),
-                                            (self.nav_objectives[self.current_nav_objective_index]['nav'][1]['position']['latitude'],
-                                             self.nav_objectives[self.current_nav_objective_index]['nav'][1]['position']['longitude']))
-                    self.sendCurrentPathSegment(self.current_segment)
-                    self.state = 'line-following'
-                else:
-                    self.current_segment = []
-                    for p in self.current_transit_path[self.current_transit_path_index:]:
-                        self.current_segment.append((p.position.latitude,p.position.longitude))
-
-                    #self.current_segment = ((self.current_transit_path[self.current_transit_path_index].position.latitude,
-                    #                         self.current_transit_path[self.current_transit_path_index].position.longitude),
-                    #                        (self.current_transit_path[self.current_transit_path_index+1].position.latitude,
-                    #                         self.current_transit_path[self.current_transit_path_index+1].position.longitude))
-                    self.sendCurrentPathSegment(self.current_segment)
-
-        if self.state == 'line-following':
-            d = self.getDistanceToNextWaypoint()
-            #print d
-            if d is not None and d['distance_to_waypoint'] < self.waypointThreshold or (1-d['progress'])*d['path_distance'] < self.waypointThreshold:
-                #self.nextObjective()
-                self.state = 'line-end'
-                    
-        if self.state == 'pre-mission' or self.state == 'line-end':
-            if self.position is not None:
-                self.nextObjective()
-                start_point = self.nav_objectives[self.current_nav_objective_index]['nav'][0]
-                next_point = self.nav_objectives[self.current_nav_objective_index]['nav'][1]
-                print start_point
-                print self.position
-                if self.distanceTo(start_point['position']['latitude'],start_point['position']['longitude']) > self.waypointThreshold:
-                    self.state = 'transit'
-                    self.current_transit_path = self.generatePath(self.position.position.latitude,self.position.position.longitude,self.heading.orientation.heading,
-                                      start_point['position']['latitude'],start_point['position']['longitude'],self.segmentHeading(
-                                          start_point['position']['latitude'],start_point['position']['longitude'],next_point['position']['latitude'],next_point['position']['longitude']))
-                    self.current_transit_path_index = 0
-                    if len(self.current_transit_path)>=2:
-                        self.current_segment = []
-                        for p in self.current_transit_path:
-                            self.current_segment.append((p.position.latitude,p.position.longitude))
-                        #self.current_segment = ((self.current_transit_path[0].position.latitude, self.current_transit_path[0].position.longitude),
-                        #                        (self.current_transit_path[1].position.latitude, self.current_transit_path[1].position.longitude))
+        if self.helm_mode == 'survey':
+            if self.state == 'transit':
+                d = self.getDistanceToNextWaypoint()
+                #print d
+                if d is not None and d['distance_to_waypoint'] < self.waypointThreshold or (1-d['progress'])*d['path_distance'] < self.waypointThreshold:
+                    self.current_transit_path_index += 1
+                    if self.current_transit_path_index >= len(self.current_transit_path)-1:
+                        self.current_segment = ((self.nav_objectives[self.current_nav_objective_index]['nav'][0]['position']['latitude'],
+                                                self.nav_objectives[self.current_nav_objective_index]['nav'][0]['position']['longitude']),
+                                                (self.nav_objectives[self.current_nav_objective_index]['nav'][1]['position']['latitude'],
+                                                self.nav_objectives[self.current_nav_objective_index]['nav'][1]['position']['longitude']))
                         self.sendCurrentPathSegment(self.current_segment)
-                else:
-                    self.state = 'line-following'
+                        self.state = 'line-following'
+                    else:
+                        self.current_segment = []
+                        for p in self.current_transit_path[self.current_transit_path_index:]:
+                            self.current_segment.append((p.position.latitude,p.position.longitude))
+
+                        #self.current_segment = ((self.current_transit_path[self.current_transit_path_index].position.latitude,
+                        #                         self.current_transit_path[self.current_transit_path_index].position.longitude),
+                        #                        (self.current_transit_path[self.current_transit_path_index+1].position.latitude,
+                        #                         self.current_transit_path[self.current_transit_path_index+1].position.longitude))
+                        self.sendCurrentPathSegment(self.current_segment)
+
+            if self.state == 'line-following':
+                d = self.getDistanceToNextWaypoint()
+                #print d
+                if d is not None and d['distance_to_waypoint'] < self.waypointThreshold or (1-d['progress'])*d['path_distance'] < self.waypointThreshold:
+                    #self.nextObjective()
+                    if self.current_segment_index >= len(self.nav_objectives[self.current_nav_objective_index]['nav'])-2:
+                        self.state = 'line-end'
+                    else:
+                        self.current_segment_index += 1
+                        self.current_segment = ((self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index]['position']['latitude'],
+                                                self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index]['position']['longitude']),
+                                                (self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index+1]['position']['latitude'],
+                                                self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index+1]['position']['longitude']))
+                        self.sendCurrentPathSegment(self.current_segment)
+                        
+            if self.state == 'pre-mission' or self.state == 'line-end':
+                if self.position is not None:
+                    self.nextObjective()
+                    start_point = self.nav_objectives[self.current_nav_objective_index]['nav'][0]
+                    next_point = self.nav_objectives[self.current_nav_objective_index]['nav'][1]
+                    print start_point
+                    print self.position
+                    if self.distanceTo(start_point['position']['latitude'],start_point['position']['longitude']) > self.waypointThreshold:
+                        self.state = 'transit'
+                        self.current_transit_path = self.generatePath(self.position.position.latitude,self.position.position.longitude,self.heading.orientation.heading,
+                                        start_point['position']['latitude'],start_point['position']['longitude'],self.segmentHeading(
+                                            start_point['position']['latitude'],start_point['position']['longitude'],next_point['position']['latitude'],next_point['position']['longitude']))
+                        self.current_transit_path_index = 0
+                        if len(self.current_transit_path)>=2:
+                            self.current_segment = []
+                            for p in self.current_transit_path:
+                                self.current_segment.append((p.position.latitude,p.position.longitude))
+                            #self.current_segment = ((self.current_transit_path[0].position.latitude, self.current_transit_path[0].position.longitude),
+                            #                        (self.current_transit_path[1].position.latitude, self.current_transit_path[1].position.longitude))
+                            self.sendCurrentPathSegment(self.current_segment)
+                    else:
+                        self.state = 'line-following'
             
     
     def nextObjective(self):
@@ -161,6 +175,7 @@ class MissionManager_Node():
                     self.current_nav_objective_index = 0
             else:
                 self.current_nav_objective_index = 0
+            self.current_segment_index = 0
             print 'nav objective index:',self.current_nav_objective_index
             
             #self.current_segment = self.nav_objectives[self.current_nav_objective_index]['nav'][0:2]
