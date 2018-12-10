@@ -46,6 +46,7 @@ class MissionManager_Node():
         rospy.Subscriber('/helm_mode', String, self.helmModeCallback, queue_size = 1)
         
         self.current_path_publisher = rospy.Publisher('/project11/mission_manager/current_path', GeoPath, queue_size = 10)
+        self.current_speed_publisher = rospy.Publisher('/project11/mission_manager/current_speed', Float32, queue_size = 10)
         self.crosstrack_error_publisher = rospy.Publisher('/project11/mission_manager/crosstrack_error', Float32, queue_size = 10)
         self.path_progress_publisher = rospy.Publisher('/project11/mission_manager/path_progress', Float32, queue_size = 10)
         self.distance_to_waypoint_publisher  = rospy.Publisher('/project11/mission_manager/distance_to_waypoint', Float32, queue_size = 10)
@@ -135,11 +136,14 @@ class MissionManager_Node():
                         self.state = 'line-end'
                     else:
                         self.current_segment_index += 1
+                        speed = None
+                        if 'parameters' in self.nav_objectives[self.current_nav_objective_index] and 'speed_ms' in self.nav_objectives[self.current_nav_objective_index]['parameters']:
+                            speed = self.nav_objectives[self.current_nav_objective_index]['parameters']['speed_ms']
                         self.current_segment = ((self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index]['position']['latitude'],
                                                 self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index]['position']['longitude']),
                                                 (self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index+1]['position']['latitude'],
                                                 self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index+1]['position']['longitude']))
-                        self.sendCurrentPathSegment(self.current_segment)
+                        self.sendCurrentPathSegment(self.current_segment, speed)
                         
             if self.state == 'pre-mission' or self.state == 'line-end':
                 if self.position is not None:
@@ -183,7 +187,7 @@ class MissionManager_Node():
             #self.sendCurrentPathSegment(self.current_segment)
             #self.sendToMOOS(self.nav_objectives[self.current_nav_objective_index]['nav'],last_current_wp)
     
-    def sendCurrentPathSegment(self, path_segment):
+    def sendCurrentPathSegment(self, path_segment, speed=None):
         gpath = GeoPath()
         gpath.header.stamp = rospy.Time.now()
         for s in path_segment:
@@ -192,6 +196,8 @@ class MissionManager_Node():
             gpose.pose.position.longitude = s[1]
             gpath.poses.append(gpose)
         self.current_path_publisher.publish(gpath)
+        if speed is not None:
+            self.current_speed_publisher.publish(speed)
 
     def generatePath(self, startLat, startLon, startHeading, targetLat, targetLon, targetHeading):
         rospy.wait_for_service('dubins_curves_latlong')
