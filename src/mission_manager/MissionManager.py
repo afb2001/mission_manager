@@ -56,6 +56,7 @@ class MissionManager_Node():
         
         self.mission = None
         self.nav_objectives = None
+        self.default_speed = None
         self.current_nav_objective_index = None
         self.current_segment = None
         self.state = 'idle'
@@ -86,6 +87,9 @@ class MissionManager_Node():
     
     def parseMission(self):
         self.nav_objectives = []
+        
+        if 'defaultspeed_ms' in self.mission.plan['DEFAULT_PARAMETERS']:
+            self.default_speed = self.mission.plan['DEFAULT_PARAMETERS']['defaultspeed_ms']
         
         for nav_item in self.mission.plan['NAVIGATION']:
             #print nav_item
@@ -198,6 +202,9 @@ class MissionManager_Node():
         self.current_path_publisher.publish(gpath)
         if speed is not None:
             self.current_speed_publisher.publish(speed)
+        else:
+            if self.default_speed is not None:
+                self.current_speed_publisher.publish(self.default_speed)
 
     def generatePath(self, startLat, startLon, startHeading, targetLat, targetLon, targetHeading):
         rospy.wait_for_service('dubins_curves_latlong')
