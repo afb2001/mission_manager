@@ -26,12 +26,14 @@ from project11_transformations.srv import LatLongToMap
 from project11_transformations.srv import LatLongToMapRequest
 from std_msgs.msg import String, Float32, Int32, Bool
 
+from dynamic_reconfigure.server import Server
+from mission_manager.cfg import mission_managerConfig
+
 class MissionManager_Node():
     
     def __init__(self):
         rospy.init_node('MissionManager')
         
-        #TODO: dynamic config!
         self.waypointThreshold = 10.0
         self.turnRadius = 20.0
         self.segmentLength = 15.0
@@ -52,7 +54,9 @@ class MissionManager_Node():
         self.distance_to_waypoint_publisher  = rospy.Publisher('/project11/mission_manager/distance_to_waypoint', Float32, queue_size = 10)
         self.status_publisher = rospy.Publisher('/project11/mission_manager/status', Heartbeat, queue_size = 10)
         
-        self. update_timer = rospy.Timer(rospy.Duration.from_sec(0.1),self.update)
+        self.update_timer = rospy.Timer(rospy.Duration.from_sec(0.1),self.update)
+        
+        self.config_server = Server(mission_managerConfig, self.reconfigure_callback)
         
         self.mission = None
         self.nav_objectives = None
@@ -62,6 +66,12 @@ class MissionManager_Node():
         self.state = 'idle'
         self.helm_mode = 'unknown'
    
+    def reconfigure_callback(self, config, level):
+        self.waypointThreshold = config['waypoint_threshold']
+        self.turnRadius = config['turn_radius']
+        self.segmentLength = config['segment_length']
+        return config
+
     def heading_callback(self, heading_msg):
         self.heading = heading_msg
     
