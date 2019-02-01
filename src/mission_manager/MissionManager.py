@@ -48,6 +48,7 @@ class MissionManager_Node():
         rospy.Subscriber('/helm_mode', String, self.helmModeCallback, queue_size = 1)
         
         self.current_path_publisher = rospy.Publisher('/project11/mission_manager/current_path', GeoPath, queue_size = 10)
+        self.survey_area_publisher = rospy.Publisher('/project11/mission_manager/survey_area', GeoPath, queue_size = 10)
         self.current_speed_publisher = rospy.Publisher('/project11/mission_manager/current_speed', Float32, queue_size = 10)
         self.crosstrack_error_publisher = rospy.Publisher('/project11/mission_manager/crosstrack_error', Float32, queue_size = 10)
         self.path_progress_publisher = rospy.Publisher('/project11/mission_manager/path_progress', Float32, queue_size = 10)
@@ -108,6 +109,8 @@ class MissionManager_Node():
                     self.nav_objectives.append(nav_item)
             except KeyError:
                 pass
+            if nav_item['pathtype'] == 'area':
+                self.nav_objectives.append(nav_item)
         print self.nav_objectives
         self.current_nav_objective_index = None
         if len(self.nav_objectives):
@@ -129,7 +132,11 @@ class MissionManager_Node():
                                                 (self.nav_objectives[self.current_nav_objective_index]['nav'][1]['position']['latitude'],
                                                 self.nav_objectives[self.current_nav_objective_index]['nav'][1]['position']['longitude']))
                         self.sendCurrentPathSegment(self.current_segment)
-                        self.state = 'line-following'
+                        if self.nav_objectives[self.current_nav_objective_index]['pathtype'] == 'area':
+                            self.sendSurveyArea()
+                            self.state = 'area-survey'
+                        else:
+                            self.state = 'line-following'
                     else:
                         self.current_segment = []
                         for p in self.current_transit_path[self.current_transit_path_index:]:
@@ -180,7 +187,11 @@ class MissionManager_Node():
                             #                        (self.current_transit_path[1].position.latitude, self.current_transit_path[1].position.longitude))
                             self.sendCurrentPathSegment(self.current_segment)
                     else:
-                        self.state = 'line-following'
+                        if self.nav_objectives[self.current_nav_objective_index]['pathtype'] == 'area':
+                            self.sendSurveyArea()
+                            self.state = 'area-survey'
+                        else:
+                            self.state = 'line-following'
             
     
     def nextObjective(self):
@@ -215,6 +226,23 @@ class MissionManager_Node():
         else:
             if self.default_speed is not None:
                 self.current_speed_publisher.publish(self.default_speed)
+                
+    def sendSurveyArea(self, speed=None):
+        gpath = GeoPath()
+        gpath.header.stamp = rospy.Time.now()
+        print 'sendSurveyArea'
+        print self.nav_objectives[self.current_nav_objective_index]['nav']
+        for s in self.nav_objectives[self.current_nav_objective_index]['nav']:
+            gpose = GeoPoseStamped()
+            gpose.pose.position.latitude = s['position']['latitude']
+            gpose.pose.position.longitude = s['position']['longitude']
+            gpath.poses.append(gpose)
+        self.survey_area_publisher.publish(gpath)
+        if speed is not None:
+            self.current_speed_publisher.publish(speed)
+        else:
+            if self.default_speed is not None:
+                self.current_speed_publisher.publish(self.default_speed)
 
     def generatePath(self, startLat, startLon, startHeading, targetLat, targetLon, targetHeading):
         rospy.wait_for_service('dubins_curves_latlong')
@@ -244,9 +272,9 @@ class MissionManager_Node():
         dubins_req.targetGeoPose.orientation.z = q[2]
         dubins_req.targetGeoPose.orientation.w = q[3]
 
-        print dubins_req
+        #print dubins_req
         dubins_path = dubins_service(dubins_req)
-        print dubins_path
+        #print dubins_path
         return dubins_path.path
         
     
