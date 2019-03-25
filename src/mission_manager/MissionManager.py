@@ -29,6 +29,9 @@ from std_msgs.msg import String, Float32, Int32, Bool
 from dynamic_reconfigure.server import Server
 from mission_manager.cfg import mission_managerConfig
 
+import actionlib
+import path_follower.msg
+
 class MissionManager_Node():
     
     def __init__(self):
