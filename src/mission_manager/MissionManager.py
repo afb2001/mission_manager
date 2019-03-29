@@ -31,6 +31,7 @@ from mission_manager.cfg import mission_managerConfig
 
 import actionlib
 import path_follower.msg
+import hover.msg
 
 class MissionManager_Node():
     
@@ -39,7 +40,11 @@ class MissionManager_Node():
         
         self.waypointThreshold = 10.0
         self.turnRadius = 20.0
-        self.segmentLength = 15.0
+        self.segmentLength = 5.0
+        
+        self.hover_minimum_distance = 5.0
+        self.hover_maximum_distance = 25.0
+        self.hover_maximum_speed = 3.0
         
         self.position = None
         self.heading = None
@@ -49,31 +54,45 @@ class MissionManager_Node():
         rospy.Subscriber('/depth', Float32, self.depth_callback, queue_size = 1)
         rospy.Subscriber('/mission_plan', String, self.missionPlanCallback, queue_size = 1)
         rospy.Subscriber('/helm_mode', String, self.helmModeCallback, queue_size = 1)
+        rospy.Subscriber('/project11/mission_manager/command', String, self.commandCallback, queue_size = 1)
         
         self.current_path_publisher = rospy.Publisher('/project11/mission_manager/current_path', GeoPath, queue_size = 10)
         self.survey_area_publisher = rospy.Publisher('/project11/mission_manager/survey_area', GeoPath, queue_size = 10)
         self.current_speed_publisher = rospy.Publisher('/project11/mission_manager/current_speed', Float32, queue_size = 10)
-        self.crosstrack_error_publisher = rospy.Publisher('/project11/mission_manager/crosstrack_error', Float32, queue_size = 10)
-        self.path_progress_publisher = rospy.Publisher('/project11/mission_manager/path_progress', Float32, queue_size = 10)
-        self.distance_to_waypoint_publisher  = rospy.Publisher('/project11/mission_manager/distance_to_waypoint', Float32, queue_size = 10)
         self.status_publisher = rospy.Publisher('/project11/mission_manager/status', Heartbeat, queue_size = 10)
+        self.current_line_publisher = rospy.Publisher('/project11/mission_manager/current_line', Int32, queue_size = 10)
         
         self.update_timer = rospy.Timer(rospy.Duration.from_sec(0.1),self.update)
         
         self.config_server = Server(mission_managerConfig, self.reconfigure_callback)
         
+        self.path_follower_client = actionlib.SimpleActionClient('path_follower_action', path_follower.msg.path_followerAction)
+        self.hover_client = actionlib.SimpleActionClient('hover_action', hover.msg.hoverAction)
+        
         self.mission = None
         self.nav_objectives = None
         self.default_speed = None
         self.current_nav_objective_index = None
-        self.current_segment = None
         self.state = 'idle'
-        self.helm_mode = 'unknown'
+        self.helm_mode = 'standby'
+        
+    def setState(self, new_state):
+        if self.state == 'hover':
+            self.hover_client.cancel_goal()
+        self.state = new_state
    
     def reconfigure_callback(self, config, level):
+        
         self.waypointThreshold = config['waypoint_threshold']
         self.turnRadius = config['turn_radius']
         self.segmentLength = config['segment_length']
+        
+        self.hover_minimum_distance = config['hover_minimum_distance']
+        if config['hover_maximum_distance'] < self.hover_minimum_distance:
+            config['hover_maximum_distance'] = self.hover_minimum_distance
+        self.hover_maximum_distance = config['hover_maximum_distance']
+        self.hover_maximum_speed = config['hover_maximum_speed']
+        
         return config
 
     def heading_callback(self, heading_msg):
@@ -93,10 +112,11 @@ class MissionManager_Node():
         self.Mission.fromfile(filename)
         
     def missionPlanCallback(self, mission_msg):
-        print mission_msg
+        print 'received mission plan'
+        #print mission_msg
         self.mission = mission_plan.missionplan.Mission()
         self.mission.fromString(mission_msg.data)
-        print self.mission
+        #print self.mission
         self.parseMission()
     
     def parseMission(self):
@@ -114,61 +134,73 @@ class MissionManager_Node():
                 pass
             if nav_item['pathtype'] == 'area':
                 self.nav_objectives.append(nav_item)
-        print self.nav_objectives
+        print len(self.nav_objectives),'nav objectives'
         self.current_nav_objective_index = None
         if len(self.nav_objectives):
             #self.current_nav_objective_index = 0
-            self.state = 'pre-mission'
+            self.setState('pre-mission')
         else:
-            self.state = 'idle'
+            self.setState('idle')
+
+    def commandCallback(self, msg):
+        cmd,args = msg.data.split(None,1)
+        print 'command:',cmd,'args:',args
+        if cmd == 'goto_line':
+            target = int(args)
+            if self.nav_objectives is not None and len(self.nav_objectives) > target:
+                self.current_nav_objective_index = target
+                self.current_line_publisher.publish(self.current_nav_objective_index)
+                path = []
+                for p in self.nav_objectives[self.current_nav_objective_index]['nav']:
+                    path.append((p['position']['latitude'],p['position']['longitude']))
+                self.sendCurrentPathSegment(path)
+                self.setState('line-following')
+        if cmd == 'start_line':
+            target = int(args)
+            if self.nav_objectives is not None and len(self.nav_objectives) > target:
+                self.current_nav_objective_index = target
+                self.current_line_publisher.publish(self.current_nav_objective_index)
+                start_point = self.nav_objectives[self.current_nav_objective_index]['nav'][0]
+                next_point = self.nav_objectives[self.current_nav_objective_index]['nav'][1]
+                self.setState('transit')
+                transit_path = self.generatePath(self.position.position.latitude,self.position.position.longitude,self.heading.orientation.heading,
+                                        start_point['position']['latitude'],start_point['position']['longitude'],self.segmentHeading(
+                                            start_point['position']['latitude'],start_point['position']['longitude'],next_point['position']['latitude'],next_point['position']['longitude']))
+                if len(transit_path)>=2:
+                    segment = []
+                    for p in transit_path:
+                        segment.append((p.position.latitude,p.position.longitude))
+                    self.sendCurrentPathSegment(segment)
+        if cmd == 'goto':
+            lat, lon = args.split()
+            lat = float(lat)
+            lon = float(lon)
+            headingToPoint = self.segmentHeading(self.position.position.latitude,self.position.position.longitude,lat,lon)
+            self.setState('transit')
+            transit_path = self.generatePath(self.position.position.latitude,self.position.position.longitude,self.heading.orientation.heading,lat,lon,headingToPoint)
+            segment = []
+            if len(transit_path)>=2:
+                for p in transit_path:
+                    segment.append((p.position.latitude,p.position.longitude))
+                self.sendCurrentPathSegment(segment)
+
+        if cmd == 'hover':
+            self.setState('hover')
+            self.path_follower_client.cancel_goal()
+            lat, lon = args.split()
+            lat = float(lat)
+            lon = float(lon)
+            goal = hover.msg.hoverGoal()
+            goal.target.latitude = lat
+            goal.target.longitude = lon
+            goal.minimum_distance = self.hover_minimum_distance
+            goal.maximum_distance = self.hover_maximum_distance
+            goal.maximum_speed = self.hover_maximum_speed
+            self.hover_client.wait_for_server()
+            self.hover_client.send_goal(goal)
 
     def checkObjective(self):
-        if self.helm_mode == 'survey':
-            if self.state == 'transit':
-                d = self.getDistanceToNextWaypoint()
-                #print d
-                if d is not None and d['distance_to_waypoint'] < self.waypointThreshold or (1-d['progress'])*d['path_distance'] < self.waypointThreshold:
-                    self.current_transit_path_index += 1
-                    if self.current_transit_path_index >= len(self.current_transit_path)-1:
-                        self.current_segment = ((self.nav_objectives[self.current_nav_objective_index]['nav'][0]['position']['latitude'],
-                                                self.nav_objectives[self.current_nav_objective_index]['nav'][0]['position']['longitude']),
-                                                (self.nav_objectives[self.current_nav_objective_index]['nav'][1]['position']['latitude'],
-                                                self.nav_objectives[self.current_nav_objective_index]['nav'][1]['position']['longitude']))
-                        self.sendCurrentPathSegment(self.current_segment)
-                        if self.nav_objectives[self.current_nav_objective_index]['pathtype'] == 'area':
-                            self.sendSurveyArea()
-                            self.state = 'area-survey'
-                        else:
-                            self.state = 'line-following'
-                    else:
-                        self.current_segment = []
-                        for p in self.current_transit_path[self.current_transit_path_index:]:
-                            self.current_segment.append((p.position.latitude,p.position.longitude))
-
-                        #self.current_segment = ((self.current_transit_path[self.current_transit_path_index].position.latitude,
-                        #                         self.current_transit_path[self.current_transit_path_index].position.longitude),
-                        #                        (self.current_transit_path[self.current_transit_path_index+1].position.latitude,
-                        #                         self.current_transit_path[self.current_transit_path_index+1].position.longitude))
-                        self.sendCurrentPathSegment(self.current_segment)
-
-            if self.state == 'line-following':
-                d = self.getDistanceToNextWaypoint()
-                #print d
-                if d is not None and d['distance_to_waypoint'] < self.waypointThreshold or (1-d['progress'])*d['path_distance'] < self.waypointThreshold:
-                    #self.nextObjective()
-                    if self.current_segment_index >= len(self.nav_objectives[self.current_nav_objective_index]['nav'])-2:
-                        self.state = 'line-end'
-                    else:
-                        self.current_segment_index += 1
-                        speed = None
-                        if 'parameters' in self.nav_objectives[self.current_nav_objective_index] and 'speed_ms' in self.nav_objectives[self.current_nav_objective_index]['parameters']:
-                            speed = self.nav_objectives[self.current_nav_objective_index]['parameters']['speed_ms']
-                        self.current_segment = ((self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index]['position']['latitude'],
-                                                self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index]['position']['longitude']),
-                                                (self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index+1]['position']['latitude'],
-                                                self.nav_objectives[self.current_nav_objective_index]['nav'][self.current_segment_index+1]['position']['longitude']))
-                        self.sendCurrentPathSegment(self.current_segment, speed)
-                        
+        if self.helm_mode == 'autonomous':
             if self.state == 'pre-mission' or self.state == 'line-end':
                 if self.position is not None:
                     self.nextObjective()
@@ -177,58 +209,75 @@ class MissionManager_Node():
                     print start_point
                     print self.position
                     if self.distanceTo(start_point['position']['latitude'],start_point['position']['longitude']) > self.waypointThreshold:
-                        self.state = 'transit'
-                        self.current_transit_path = self.generatePath(self.position.position.latitude,self.position.position.longitude,self.heading.orientation.heading,
+                        self.setState('transit')
+                        transit_path = self.generatePath(self.position.position.latitude,self.position.position.longitude,self.heading.orientation.heading,
                                         start_point['position']['latitude'],start_point['position']['longitude'],self.segmentHeading(
                                             start_point['position']['latitude'],start_point['position']['longitude'],next_point['position']['latitude'],next_point['position']['longitude']))
-                        self.current_transit_path_index = 0
-                        if len(self.current_transit_path)>=2:
-                            self.current_segment = []
-                            for p in self.current_transit_path:
-                                self.current_segment.append((p.position.latitude,p.position.longitude))
-                            #self.current_segment = ((self.current_transit_path[0].position.latitude, self.current_transit_path[0].position.longitude),
-                            #                        (self.current_transit_path[1].position.latitude, self.current_transit_path[1].position.longitude))
-                            self.sendCurrentPathSegment(self.current_segment)
+                        if len(transit_path)>=2:
+                            segment = []
+                            for p in transit_path:
+                                segment.append((p.position.latitude,p.position.longitude))
+                            self.sendCurrentPathSegment(segment)
                     else:
                         if self.nav_objectives[self.current_nav_objective_index]['pathtype'] == 'area':
                             self.sendSurveyArea()
-                            self.state = 'area-survey'
+                            self.setState('area-survey')
                         else:
-                            self.state = 'line-following'
+                            self.setState('line-following')
             
     
     def nextObjective(self):
         if self.nav_objectives is not None and len(self.nav_objectives):
-            last_current_wp = None
             if self.current_nav_objective_index is not None:
-                last_current_wp = self.nav_objectives[self.current_nav_objective_index]['nav'][-1]
                 self.current_nav_objective_index += 1
                 if self.current_nav_objective_index >= len(self.nav_objectives):
                     self.current_nav_objective_index = 0
             else:
                 self.current_nav_objective_index = 0
-            self.current_segment_index = 0
             print 'nav objective index:',self.current_nav_objective_index
-            
-            #self.current_segment = self.nav_objectives[self.current_nav_objective_index]['nav'][0:2]
-            #print self.current_segment
-            #self.sendCurrentPathSegment(self.current_segment)
-            #self.sendToMOOS(self.nav_objectives[self.current_nav_objective_index]['nav'],last_current_wp)
+            self.current_line_publisher.publish(self.current_nav_objective_index)
     
     def sendCurrentPathSegment(self, path_segment, speed=None):
-        gpath = GeoPath()
-        gpath.header.stamp = rospy.Time.now()
+        goal = path_follower.msg.path_followerGoal()
+        goal.path.header.stamp = rospy.Time.now()
         for s in path_segment:
             gpose = GeoPoseStamped()
             gpose.pose.position.latitude = s[0]
             gpose.pose.position.longitude = s[1]
-            gpath.poses.append(gpose)
-        self.current_path_publisher.publish(gpath)
+            goal.path.poses.append(gpose)
         if speed is not None:
-            self.current_speed_publisher.publish(speed)
+            goal.speed = speed
         else:
             if self.default_speed is not None:
-                self.current_speed_publisher.publish(self.default_speed)
+                goal.speed = self.default_speed
+        self.current_path_publisher.publish(goal.path)
+        self.path_follower_client.wait_for_server()
+        self.path_follower_client.send_goal(goal, self.path_follower_done_callback, self.path_follower_active_callback, self.path_follower_feedback_callback)
+
+    def path_follower_done_callback(self, status, result):
+        print 'path follower done: status:',status
+        #print 'result:',result
+        if self.state == 'line-following':
+            self.state = 'line-end'
+        if self.state == 'transit':
+            path = []
+            for p in self.nav_objectives[self.current_nav_objective_index]['nav']:
+                path.append((p['position']['latitude'],p['position']['longitude']))
+            self.sendCurrentPathSegment(path)
+            if self.nav_objectives[self.current_nav_objective_index]['pathtype'] == 'area':
+                self.sendSurveyArea()
+                self.state = 'area-survey'
+            else:
+                self.state = 'line-following'
+
+
+
+    def path_follower_active_callback(self):
+        pass
+
+    def path_follower_feedback_callback(self, msg):
+        #todo check if making good progress, maybe if crosstrack error or % complete get out of whack, intervene?
+        pass
                 
     def sendSurveyArea(self, speed=None):
         gpath = GeoPath()
@@ -317,51 +366,6 @@ class MissionManager_Node():
         
         path_azimuth, path_distance = project11.geodesic.inverse(start_lon_rad, start_lat_rad, dest_lon_rad, dest_lat_rad)
         return math.degrees(path_azimuth)
-        
-        
-    def getDistanceToNextWaypoint(self):
-        if self.current_segment is not None:
-            ret = {}
-            start_lat_rad = math.radians(self.current_segment[0][0])
-            start_lon_rad = math.radians(self.current_segment[0][1])
-
-            dest_lat_rad = math.radians(self.current_segment[1][0])
-            dest_lon_rad = math.radians(self.current_segment[1][1])
-            
-            current_lat_rad = math.radians(self.position.position.latitude)
-            current_lon_rad = math.radians(self.position.position.longitude)
-            
-            path_azimuth, path_distance = project11.geodesic.inverse(start_lon_rad, start_lat_rad, dest_lon_rad, dest_lat_rad)
-            ret['path_azimuth'] = path_azimuth
-            ret['path_distance'] = path_distance
-            
-            #print 'path azimuth, distance:', path_azimuth, path_distance
-
-            vehicle_azimuth, vehicle_distance = project11.geodesic.inverse(start_lon_rad, start_lat_rad, current_lon_rad, current_lat_rad)
-            ret['vehicle_azimuth'] = vehicle_azimuth
-            ret['vehicle_distance'] = vehicle_distance
-
-            #print 'vehicle azimuth, distance:', vehicle_azimuth, vehicle_distance
-            
-            error_azimuth = vehicle_azimuth - path_azimuth
-            #print 'error azimuth',error_azimuth
-            sin_error_azimuth = math.sin(error_azimuth)
-            cos_error_azimuth = math.cos(error_azimuth)
-            
-            cross_track = vehicle_distance*sin_error_azimuth
-            progress = (vehicle_distance/path_distance)*cos_error_azimuth
-            ret['cross_track'] = cross_track
-            ret['progress'] = progress
-            self.crosstrack_error_publisher.publish(cross_track)
-            self.path_progress_publisher.publish(progress)
-            
-            #print 'cross track, progress',cross_track,progress
-            
-            azimuth,distance = project11.geodesic.inverse(current_lon_rad, current_lat_rad, dest_lon_rad, dest_lat_rad)
-            self.distance_to_waypoint_publisher.publish(distance)
-            ret['azimuth_to_waypoint'] = azimuth
-            ret['distance_to_waypoint'] = distance
-            return ret
         
 
     def update(self, event):
