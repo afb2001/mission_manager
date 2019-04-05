@@ -25,6 +25,7 @@ from mission_manager.msg import BehaviorControl
 from project11_transformations.srv import LatLongToMap
 from project11_transformations.srv import LatLongToMapRequest
 from std_msgs.msg import String, Float32, Int32, Bool
+from geographic_visualization_msgs.msg import GeoVizItem, GeoVizPointList
 
 from dynamic_reconfigure.server import Server
 from mission_manager.cfg import mission_managerConfig
@@ -56,11 +57,12 @@ class MissionManager_Node():
         rospy.Subscriber('/helm_mode', String, self.helmModeCallback, queue_size = 1)
         rospy.Subscriber('/project11/mission_manager/command', String, self.commandCallback, queue_size = 1)
         
-        self.current_path_publisher = rospy.Publisher('/project11/mission_manager/current_path', GeoPath, queue_size = 10)
+        #self.current_path_publisher = rospy.Publisher('/project11/mission_manager/current_path', GeoPath, queue_size = 10)
         self.survey_area_publisher = rospy.Publisher('/project11/mission_manager/survey_area', GeoPath, queue_size = 10)
         self.current_speed_publisher = rospy.Publisher('/project11/mission_manager/current_speed', Float32, queue_size = 10)
         self.status_publisher = rospy.Publisher('/project11/mission_manager/status', Heartbeat, queue_size = 10)
         self.current_line_publisher = rospy.Publisher('/project11/mission_manager/current_line', Int32, queue_size = 10)
+        self.display_publisher = rospy.Publisher('/project11/display', GeoVizItem, queue_size = 10)
         
         self.update_timer = rospy.Timer(rospy.Duration.from_sec(0.1),self.update)
         
@@ -240,17 +242,26 @@ class MissionManager_Node():
     def sendCurrentPathSegment(self, path_segment, speed=None):
         goal = path_follower.msg.path_followerGoal()
         goal.path.header.stamp = rospy.Time.now()
+        display_item = GeoVizItem()
+        display_item.id = "current_path"
+        display_points = GeoVizPointList()
+        display_points.color.r = 1.0
+        display_points.color.a = 1.0
+        display_points.size = 5.0
         for s in path_segment:
             gpose = GeoPoseStamped()
             gpose.pose.position.latitude = s[0]
             gpose.pose.position.longitude = s[1]
             goal.path.poses.append(gpose)
+            display_points.points.append(gpose.pose.position)
         if speed is not None:
             goal.speed = speed
         else:
             if self.default_speed is not None:
                 goal.speed = self.default_speed
-        self.current_path_publisher.publish(goal.path)
+        #self.current_path_publisher.publish(goal.path)
+        display_item.lines.append(display_points)
+        self.display_publisher.publish(display_item)
         self.path_follower_client.wait_for_server()
         self.path_follower_client.send_goal(goal, self.path_follower_done_callback, self.path_follower_active_callback, self.path_follower_feedback_callback)
 
