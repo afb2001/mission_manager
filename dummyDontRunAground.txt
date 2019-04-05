@@ -1,0 +1,11 @@
+{
+    "DEFAULT_PARAMETERS": {
+        "behaviors": {
+            "dont_run_aground_ben": {
+                "Active": true, 
+                "Enabled": true, 
+                "mindepth_m": 4
+            }
+        }
+    }
+}
