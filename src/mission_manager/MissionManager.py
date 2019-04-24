@@ -31,7 +31,7 @@ from dynamic_reconfigure.server import Server
 from mission_manager.cfg import mission_managerConfig
 
 import actionlib
-import path_follower.msg
+import path_planner.msg
 import hover.msg
 
 class MissionManager_Node():
@@ -68,7 +68,7 @@ class MissionManager_Node():
         
         self.config_server = Server(mission_managerConfig, self.reconfigure_callback)
         
-        self.path_follower_client = actionlib.SimpleActionClient('path_follower_action', path_follower.msg.path_followerAction)
+        self.path_follower_client = actionlib.SimpleActionClient('path_planner_action', path_planner.msg.path_plannerAction)
         self.hover_client = actionlib.SimpleActionClient('hover_action', hover.msg.hoverAction)
         
         self.mission = None
@@ -240,7 +240,7 @@ class MissionManager_Node():
             self.current_line_publisher.publish(self.current_nav_objective_index)
     
     def sendCurrentPathSegment(self, path_segment, speed=None):
-        goal = path_follower.msg.path_followerGoal()
+        goal = path_planner.msg.path_plannerGoal()
         goal.path.header.stamp = rospy.Time.now()
         display_item = GeoVizItem()
         display_item.id = "current_path"
