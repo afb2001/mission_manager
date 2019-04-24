@@ -46,6 +46,8 @@ class MissionManager_Node():
         self.hover_minimum_distance = 5.0
         self.hover_maximum_distance = 25.0
         self.hover_maximum_speed = 3.0
+
+        self.default_speed = None
         
         self.position = None
         self.heading = None
@@ -73,7 +75,6 @@ class MissionManager_Node():
         
         self.mission = None
         self.nav_objectives = None
-        self.default_speed = None
         self.current_nav_objective_index = None
         self.state = 'idle'
         self.helm_mode = 'standby'
@@ -94,6 +95,8 @@ class MissionManager_Node():
             config['hover_maximum_distance'] = self.hover_minimum_distance
         self.hover_maximum_distance = config['hover_maximum_distance']
         self.hover_maximum_speed = config['hover_maximum_speed']
+        
+        self.default_speed = config['default_speed']
         
         return config
 
@@ -126,6 +129,7 @@ class MissionManager_Node():
         
         if 'defaultspeed_ms' in self.mission.plan['DEFAULT_PARAMETERS']:
             self.default_speed = self.mission.plan['DEFAULT_PARAMETERS']['defaultspeed_ms']
+            self.config_server.update_configuration({'default_speed':self.default_speed})
         
         for nav_item in self.mission.plan['NAVIGATION']:
             #print nav_item
@@ -259,6 +263,7 @@ class MissionManager_Node():
         else:
             if self.default_speed is not None:
                 goal.speed = self.default_speed
+        print 'speed:', goal.speed
         #self.current_path_publisher.publish(goal.path)
         display_item.lines.append(display_points)
         self.display_publisher.publish(display_item)
