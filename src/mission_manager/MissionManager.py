@@ -149,7 +149,13 @@ class MissionManager_Node():
             self.setState('idle')
 
     def commandCallback(self, msg):
-        cmd,args = msg.data.split(None,1)
+        parts = msg.data.split(None,1)
+        cmd = parts[0]
+        if len(parts) > 1:
+            args = parts[1]
+        else:
+            args = None
+                
         print 'command:',cmd,'args:',args
         if cmd == 'goto_line':
             target = int(args)
@@ -204,6 +210,10 @@ class MissionManager_Node():
             goal.maximum_speed = self.hover_maximum_speed
             self.hover_client.wait_for_server()
             self.hover_client.send_goal(goal)
+            
+        if cmd == 'clear_mission':
+            self.mission = mission_plan.missionplan.Mission()
+            self.parseMission()
 
     def checkObjective(self):
         if self.helm_mode == 'autonomous':
