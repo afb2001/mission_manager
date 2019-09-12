@@ -56,7 +56,7 @@ class MissionManager_Node():
         rospy.Subscriber('/heading', NavEulerStamped, self.heading_callback, queue_size = 1)
         rospy.Subscriber('/depth', Float32, self.depth_callback, queue_size = 1)
         rospy.Subscriber('/mission_plan', String, self.missionPlanCallback, queue_size = 1)
-        rospy.Subscriber('/helm_mode', String, self.helmModeCallback, queue_size = 1)
+        rospy.Subscriber('/piloting_mode', String, self.helmModeCallback, queue_size = 1)
         rospy.Subscriber('/project11/mission_manager/command', String, self.commandCallback, queue_size = 1)
         
         #self.current_path_publisher = rospy.Publisher('/project11/mission_manager/current_path', GeoPath, queue_size = 10)
@@ -77,7 +77,7 @@ class MissionManager_Node():
         self.nav_objectives = None
         self.current_nav_objective_index = None
         self.state = 'idle'
-        self.helm_mode = 'standby'
+        self.piloting_mode = 'standby'
         
     def setState(self, new_state):
         if self.state == 'hover':
@@ -110,7 +110,7 @@ class MissionManager_Node():
         self.depth = depth_msg
         
     def helmModeCallback(self, msg):
-        self.helm_mode = msg.data
+        self.piloting_mode = msg.data
             
     def readMission(self, filename): 
         '''Read mission file and make list of nav objectives'''
@@ -216,7 +216,7 @@ class MissionManager_Node():
             self.parseMission()
 
     def checkObjective(self):
-        if self.helm_mode == 'autonomous':
+        if self.piloting_mode == 'autonomous':
             if self.state == 'pre-mission' or self.state == 'line-end':
                 if self.position is not None:
                     self.nextObjective()

@@ -7,15 +7,24 @@ import smach_ros
 from std_msgs.msg import String
 from geographic_msgs.msg import GeoPointStamped
 from marine_msgs.msg import NavEulerStamped
+from geographic_msgs.msg import GeoPoseStamped
+from geographic_msgs.msg import GeoPose
 
 from dynamic_reconfigure.server import Server
 from mission_manager.cfg import mission_managerConfig
+
+from dubins_curves.srv import DubinsCurvesLatLong
+from dubins_curves.srv import DubinsCurvesLatLongRequest
 
 import actionlib
 import path_follower.msg
 import hover.msg
 
+import project11
+from tf.transformations import quaternion_from_euler
+
 import json
+import math
 
 class MissionManagerCore:
     def __init__(self):
@@ -54,6 +63,8 @@ class MissionManagerCore:
         return self.piloting_mode
     
     def hasPendingTasks(self):
+        if len(self.tasks):
+            return True
         return False
 
     def commandCallback(self, msg):
@@ -64,11 +75,11 @@ class MissionManagerCore:
         else:
             args = None
                 
-        print 'command:',cmd,'args:',args
+        #print 'command:',cmd,'args:',args
         
         if cmd == 'replace_task':
             self.clearTasks()
-            self.appendTask(args)
+            self.addTask(args)
             
         if cmd == 'append_task':
             self.addTask(args)
@@ -192,7 +203,7 @@ class MissionManagerCore:
         dubins_req.startGeoPose.position.latitude = startLat
         dubins_req.startGeoPose.position.longitude = startLon
 
-        start_yaw = math.radians(self.headToYaw(startHeading))
+        start_yaw = math.radians(self.headingToYaw(startHeading))
         start_quat = quaternion_from_euler(0.0,0.0,start_yaw)
         dubins_req.startGeoPose.orientation.x = start_quat[0]
         dubins_req.startGeoPose.orientation.y = start_quat[1]
@@ -202,7 +213,7 @@ class MissionManagerCore:
         dubins_req.targetGeoPose.position.latitude = targetLat
         dubins_req.targetGeoPose.position.longitude = targetLon
       
-        target_yaw = math.radians(self.headToYaw(targetHeading))
+        target_yaw = math.radians(self.headingToYaw(targetHeading))
         q = quaternion_from_euler(0.0,0.0,target_yaw)
         dubins_req.targetGeoPose.orientation.x = q[0]
         dubins_req.targetGeoPose.orientation.y = q[1]
@@ -226,6 +237,9 @@ class MissionManagerCore:
 
     def  headingToPoint(self,lat,lon):
         return self.segmentHeading(self.position.position.latitude, self.position.position.longitude, lat, lon)
+    
+    def headingToYaw(self, heading):
+        return 90-heading
                
 class MMState(smach.State):
     '''
@@ -286,7 +300,11 @@ class NextTask(MMState):
         if self.missionManager.current_task_index is None:
             self.missionManager.current_task_index = 0
         else:
-            self.missionManager.current_task_index += 1
+            if self.missionManager.current_task['type'] == 'mission_plan':
+                if self.missionManager.current_task['current_nav_objective_index'] >= len(self.missionManager.current_task['nav_objectives']):
+                    self.missionManager.current_task_index += 1
+            else:
+                self.missionManager.current_task_index += 1
         if self.missionManager.current_task_index < len(self.missionManager.tasks):
             self.missionManager.current_task = self.missionManager.tasks[self.missionManager.current_task_index]
             return self.missionManager.current_task['type']
@@ -296,7 +314,7 @@ class NextTask(MMState):
 
 class Hover(MMState):
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=['cancelled','error','exit'])
+        MMState.__init__(self, mm, outcomes=['cancelled','exit','pause'])
         self.hover_client = actionlib.SimpleActionClient('hover_action', hover.msg.hoverAction)
         self.task = None
         
@@ -326,6 +344,8 @@ class MissionPlan(MMState):
         # are we resuming?
         if self.task == self.missionManager.current_task:
             if self.task['current_nav_objective_index'] >= len(self.task['nav_objectives']):
+                self.task['current_nav_objective_index'] = None
+                self.task = None
                 return 'done'
             if not 'current_path' in self.task or self.task['current_path'] is None:
                 self.generatePaths()
@@ -341,16 +361,20 @@ class MissionPlan(MMState):
     def generatePaths(self):
         path = []
         for p in self.task['nav_objectives'][self.task['current_nav_objective_index']]['nav']:
-            path.append((p['position']['latitude'],p['position']['longitude']))
+            #path.append((p['position']['latitude'],p['position']['longitude']))
+            gp = GeoPose();
+            gp.position.latitude = p['position']['latitude']
+            gp.position.longitude = p['position']['longitude']
+            path.append(gp)
         self.task['current_path'] = path
         # decide if we transit or start line
         self.task['transit_path'] = None
         if len(self.task['current_path']) >1:
             start_point = self.task['current_path'][0]
             next_point = self.task['current_path'][1]
-            if self.missionManager.distanceTo(start_point['position']['latitude'],start_point['position']['longitude']) > self.missionManager.waypointThreshold:
+            if self.missionManager.distanceTo(start_point.position.latitude,start_point.position.longitude) > self.missionManager.waypointThreshold:
                 #transit
-                transit_path = self.missionManager.generatePathFromVehicle(start_point['position']['latitude'],start_point['position']['longitude'],self.missionManager.segmentHeading(start_point['position']['latitude'],start_point['position']['longitude'],next_point['position']['latitude'],next_point['position']['longitude']))
+                transit_path = self.missionManager.generatePathFromVehicle(start_point.position.latitude,start_point.position.longitude, self.missionManager.segmentHeading(start_point.position.latitude,start_point.position.longitude,next_point.position.latitude,next_point.position.longitude))
                 self.task['transit_path'] = transit_path
         
 class Goto(MMState):
@@ -373,9 +397,10 @@ class Goto(MMState):
         
 class FollowPath(MMState):
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=[])
+        MMState.__init__(self, mm, outcomes=['done','cancelled','exit','pause'])
         self.path_follower_client = actionlib.SimpleActionClient('path_follower_action', path_follower.msg.path_followerAction)
         self.task = None
+        self.task_complete = False
         
     def execute(self, userdata):
         if self.missionManager.current_task is not None:
@@ -390,16 +415,36 @@ class FollowPath(MMState):
                 else:
                     path = self.task['current_path']
             for s in path:
+                #print s
                 gpose = GeoPoseStamped()
-                gpose.pose.position.latitude = s[0]
-                gpose.pose.position.longitude = s[1]
+                gpose.pose = s
                 goal.path.poses.append(gpose)
             goal.speed = self.task['default_speed']
+            self.task_complete = False
             self.path_follower_client.wait_for_server()
             self.path_follower_client.send_goal(goal, self.path_follower_done_callback, self.path_follower_active_callback, self.path_follower_feedback_callback)
 
+        while self.missionManager.current_task == self.task:
+            if rospy.is_shutdown():
+                return 'exit'
+            if self.missionManager.getPilotingMode() != 'autonomous':
+                return 'pause'
+            if self.task_complete:
+                if self.task['type'] == 'mission_plan':
+                    if self.task['transit_path'] is not None:
+                        self.task['transit_path'] = None
+                    else:
+                        self.task['current_path'] = None
+                        self.task['current_nav_objective_index'] += 1
+                self.task = None
+                return 'done'
+        self.path_follower_client.cancel_goal()
+        self.task = None
+        return 'cancelled'
+
+
     def path_follower_done_callback(self, status, result):
-        pass
+        self.task_complete = True
     
     def path_follower_active_callback(self):
         pass
@@ -421,11 +466,11 @@ def main():
         
         with sm_auto:
             smach.StateMachine.add('IDLE', Idle(missionManager), transitions={'do-task':'NEXTTASK', 'pause':'pause'})
-            smach.StateMachine.add('NEXTTASK', NextTask(missionManager), transitions={'idle':'IDLE'})
-            smach.StateMachine.add('HOVER', Hover(missionManager), transitions={})
-            smach.StateMachine.add('MISSIONPLAN', MissionPlan(missionManager), transitions={})
+            smach.StateMachine.add('NEXTTASK', NextTask(missionManager), transitions={'idle':'IDLE', 'mission_plan':'MISSIONPLAN', 'hover':'HOVER', 'goto':'GOTO'})
+            smach.StateMachine.add('HOVER', Hover(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK'})
+            smach.StateMachine.add('MISSIONPLAN', MissionPlan(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
             smach.StateMachine.add('GOTO',Goto(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
-            smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager), transitions={})
+            smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'NEXTTASK'})
 
         smach.StateMachine.add('AUTONOMOUS', sm_auto, transitions={'pause':'PAUSE', 'exit':'exit'})
     
