@@ -18,6 +18,7 @@ from dubins_curves.srv import DubinsCurvesLatLongRequest
 
 import actionlib
 import path_follower.msg
+import path_planner.msg
 import hover.msg
 
 import project11
@@ -57,6 +58,10 @@ class MissionManagerCore:
         self.turnRadius = config['turn_radius']
         self.segmentLength = config['segment_length']
         self.default_speed = config['default_speed']
+        if config['planner'] == 0:
+            self.planner = 'path_follower'
+        elif config['planner'] == 1:
+            self.planner = 'path_planner'
         return config
         
     def getPilotingMode(self):
@@ -399,13 +404,17 @@ class FollowPath(MMState):
     def __init__(self, mm):
         MMState.__init__(self, mm, outcomes=['done','cancelled','exit','pause'])
         self.path_follower_client = actionlib.SimpleActionClient('path_follower_action', path_follower.msg.path_followerAction)
+        self.path_planner_client = actionlib.SimpleActionClient('path_planner_action', path_planner.msg.path_plannerAction)
         self.task = None
         self.task_complete = False
         
     def execute(self, userdata):
         if self.missionManager.current_task is not None:
             self.task = self.missionManager.current_task
-            goal = path_follower.msg.path_followerGoal()
+            if self.missionManager.planner == 'path_follower':
+                goal = path_follower.msg.path_followerGoal()
+            elif self.missionManager.planner == 'path_planner':   
+                goal = path_planner.msg.path_plannerGoal()
             goal.path.header.stamp = rospy.Time.now()
             if self.task['type'] == 'goto':
                 path = self.task['path']
@@ -421,8 +430,14 @@ class FollowPath(MMState):
                 goal.path.poses.append(gpose)
             goal.speed = self.task['default_speed']
             self.task_complete = False
-            self.path_follower_client.wait_for_server()
-            self.path_follower_client.send_goal(goal, self.path_follower_done_callback, self.path_follower_active_callback, self.path_follower_feedback_callback)
+            if self.missionManager.planner == 'path_follower':
+                self.path_planner_client.cancel_goal()
+                self.path_follower_client.wait_for_server()
+                self.path_follower_client.send_goal(goal, self.path_follower_done_callback, self.path_follower_active_callback, self.path_follower_feedback_callback)
+            elif self.missionManager.planner == 'path_planner':
+                self.path_follower_client.cancel_goal()
+                self.path_planner_client.wait_for_server()
+                self.path_planner_client.send_goal(goal, self.path_follower_done_callback, self.path_follower_active_callback, self.path_follower_feedback_callback)
 
         while self.missionManager.current_task == self.task:
             if rospy.is_shutdown():
@@ -438,6 +453,7 @@ class FollowPath(MMState):
                         self.task['current_nav_objective_index'] += 1
                 self.task = None
                 return 'done'
+            rospy.sleep(0.1)
         self.path_follower_client.cancel_goal()
         self.task = None
         return 'cancelled'

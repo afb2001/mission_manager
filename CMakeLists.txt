@@ -10,6 +10,8 @@ find_package(catkin REQUIRED COMPONENTS
   tf2
   message_generation
   dynamic_reconfigure
+  path_follower
+  path_planner
 )
 
 catkin_python_setup()
