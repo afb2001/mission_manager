@@ -20,16 +20,6 @@ generate_dynamic_reconfigure_options(
     cfg/mission_manager.cfg
 )
 
-add_message_files(
-   FILES
-   BehaviorControl.msg
-)
-
-generate_messages(
-   DEPENDENCIES
-   std_msgs
-)
-
 
 catkin_package(
 #  INCLUDE_DIRS include
