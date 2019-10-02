@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 2.8.3)
 project(mission_manager)
 
 find_package(catkin REQUIRED COMPONENTS
-  mission_plan
   rospy
   std_msgs
   geometry_msgs
@@ -24,7 +23,7 @@ generate_dynamic_reconfigure_options(
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES missionmanager
-  CATKIN_DEPENDS mission_plan rospy std_msgs geometry_msgs
+  CATKIN_DEPENDS rospy std_msgs geometry_msgs
 #  DEPENDS system_lib
 )
 
