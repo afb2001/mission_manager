@@ -4,31 +4,19 @@
   <version>0.0.0</version>
   <description>The mission_manager package</description>
 
-  <maintainer email="ldavis@ccom.unh.edu">ldavis</maintainer>
+  <maintainer email="roland@ccom.unh.edu">Roland Arsenault</maintainer>
   <license>BSD</license>
 
-
   <build_depend>message_generation</build_depend>
-  <build_depend>dynamic_reconfigure</build_depend>
   <exec_depend>message_runtime</exec_depend>
   <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>mission_plan</build_depend>
-  <build_depend>rospy</build_depend>
-  <build_depend>std_msgs</build_depend>
-  <build_depend>geometry_msgs</build_depend>
-  <build_depend>project11_transformations</build_depend>
-  <build_export_depend>mission_plan</build_export_depend>
-  <build_export_depend>rospy</build_export_depend>
-  <build_export_depend>std_msgs</build_export_depend>
-  <build_export_depend>geometry_msgs</build_export_depend>
-  <build_export_depend>project11_transformations</build_export_depend>
-  <exec_depend>mission_plan</exec_depend>
-  <exec_depend>rospy</exec_depend>
-  <exec_depend>std_msgs</exec_depend>
-  <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>project11_transformations</exec_depend>
-  <exec_depend>dynamic_reconfigure</exec_depend>
-
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>project11_transformations</depend>
+  <depend>dynamic_reconfigure</depend>
+  <depend>path_follower</depend>
+  <depend>path_planner</depend>
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>
