@@ -153,6 +153,7 @@ class MissionManagerCore:
 
     def addTask(self, args, prepend=False):
         parts = args.split(None,1)
+        print parts
         if len(parts) == 2:
             task_type = parts[0]
             task = None
@@ -175,6 +176,10 @@ class MissionManagerCore:
                 else:
                     self.tasks.append(task)
                     self.pending_tasks.append(task)
+        print 'tasks'
+        print self.tasks
+        print 'pending tasks'
+        print self.pending_tasks
 
     def setOverride(self, task):
         if self.current_task is not None:
@@ -203,15 +208,19 @@ class MissionManagerCore:
         
         plan = json.loads(mp)
         
-        if 'defaultspeed_ms' in plan['DEFAULT_PARAMETERS']:
-            ret['default_speed'] = plan['DEFAULT_PARAMETERS']['defaultspeed_ms']
-
-        for nav_item in plan['NAVIGATION']:
-            try:
-                if nav_item['type'] == 'survey_line':
-                    ret['nav_objectives'].append(nav_item)
-            except KeyError:
-                pass
+        for item in plan:
+            #print item
+            if item['type'] == 'Platform':
+                ret['default_speed'] = item['speed']*0.514444  # knots to m/s
+            if item['type'] == 'SurveyPattern':
+                for c in item['children']:
+                    ret['nav_objectives'].append(c)
+                ret['label'] = item['label']
+            if item['type'] == 'TrackLine':
+                ret['nav_objectives'].append(item)
+                ret['label'] = item['label']
+            
+        
         ret['current_nav_objective_index'] = 0
         return ret
 
@@ -281,12 +290,25 @@ class MissionManagerCore:
 
         hb.values.append(KeyValue('state',state))
         hb.values.append(KeyValue('tasks_count',str(len(self.tasks))))
+        for t in self.tasks:
+            tstring = t['type']
+            if t['type'] == 'mission_plan':
+                tstring += ' ('+t['label']+')'
+            hb.values.append(KeyValue('-task',tstring))
+
         hb.values.append(KeyValue('pending_tasks_count',str(len(self.pending_tasks))))
+        for t in self.pending_tasks:
+            tstring = t['type']
+            if t['type'] == 'mission_plan':
+                tstring += ' ('+t['label']+')'
+            hb.values.append(KeyValue('-pending task',tstring))
+
         if self.current_task is None:
             hb.values.append(KeyValue('current_task','None'))
         else:
             hb.values.append(KeyValue('current_task_type',self.current_task['type']))
             if self.current_task['type'] == 'mission_plan':
+                hb.values.append(KeyValue('current_task_label',self.current_task['label']))
                 hb.values.append(KeyValue('current_task_nav_objective_count',str(len(self.current_task['nav_objectives']))))
                 hb.values.append(KeyValue('current_task_nav_objective_index',str(self.current_task['current_nav_objective_index'])))
         self.status_publisher.publish(hb)
@@ -402,11 +424,12 @@ class MissionPlan(MMState):
 
     def generatePaths(self, task):
         path = []
-        for p in task['nav_objectives'][task['current_nav_objective_index']]['nav']:
+        print task['nav_objectives']
+        for p in task['nav_objectives'][task['current_nav_objective_index']]['waypoints']:
             #path.append((p['position']['latitude'],p['position']['longitude']))
             gp = GeoPose();
-            gp.position.latitude = p['position']['latitude']
-            gp.position.longitude = p['position']['longitude']
+            gp.position.latitude = p['latitude']
+            gp.position.longitude = p['longitude']
             path.append(gp)
         task['current_path'] = path
         # decide if we transit or start line
