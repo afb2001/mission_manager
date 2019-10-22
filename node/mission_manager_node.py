@@ -437,7 +437,7 @@ class MissionPlan(MMState):
         if len(task['current_path']) >1:
             start_point = task['current_path'][0]
             next_point = task['current_path'][1]
-            if task['do_transit'] and self.missionManager.distanceTo(start_point.position.latitude,start_point.position.longitude) > self.missionManager.waypointThreshold:
+            if task['do_transit'] and self.missionManager.distanceTo(start_point.position.latitude,start_point.position.longitude) > self.missionManager.waypointThreshold and self.missionManager.planner == 'path_follower':
                 #transit
                 transit_path = self.missionManager.generatePathFromVehicle(start_point.position.latitude,start_point.position.longitude, self.missionManager.segmentHeading(start_point.position.latitude,start_point.position.longitude,next_point.position.latitude,next_point.position.longitude))
                 task['transit_path'] = transit_path
