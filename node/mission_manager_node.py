@@ -11,6 +11,7 @@ from marine_msgs.msg import Heartbeat
 from marine_msgs.msg import KeyValue
 from geographic_msgs.msg import GeoPoseStamped
 from geographic_msgs.msg import GeoPose
+from geographic_msgs.msg import GeoPoint
 
 from dynamic_reconfigure.server import Server
 from mission_manager.cfg import mission_managerConfig
@@ -22,6 +23,7 @@ import actionlib
 import path_follower.msg
 import path_planner.msg
 import hover.msg
+import manda_coverage.msg
 
 import project11
 from tf.transformations import quaternion_from_euler
@@ -209,7 +211,7 @@ class MissionManagerCore:
         plan = json.loads(mp)
         
         for item in plan:
-            #print item
+            print item
             if item['type'] == 'Platform':
                 ret['default_speed'] = item['speed']*0.514444  # knots to m/s
             if item['type'] == 'SurveyPattern':
@@ -219,7 +221,9 @@ class MissionManagerCore:
             if item['type'] == 'TrackLine':
                 ret['nav_objectives'].append(item)
                 ret['label'] = item['label']
-            
+            if item['type'] == 'SurveyArea':
+                ret['nav_objectives'].append(item)
+                ret['label'] = item['label']
         
         ret['current_nav_objective_index'] = 0
         return ret
@@ -407,7 +411,7 @@ class LineEnded(MMState):
         
 class MissionPlan(MMState):
     def __init__(self, mm):
-        MMState.__init__(self, mm, outcomes=['follow_path','done'])
+        MMState.__init__(self, mm, outcomes=['follow_path','survey_area','done'])
         
     def execute(self, userdata):
         task = self.missionManager.current_task
@@ -417,6 +421,8 @@ class MissionPlan(MMState):
             if task['current_nav_objective_index'] >= len(task['nav_objectives']):
                 task['current_nav_objective_index'] = None
                 return 'done'
+            if task['nav_objectives'][task['current_nav_objective_index']]['type'] == 'SurveyArea':
+                return 'survey_area'
             if not 'current_path' in task or task['current_path'] is None:
                 self.generatePaths(task)
             return 'follow_path'
@@ -519,6 +525,49 @@ class FollowPath(MMState):
     
     def path_follower_feedback_callback(self, msg):
         pass
+
+class SurveyArea(MMState):
+    def __init__(self, mm):
+        MMState.__init__(self, mm, outcomes=['done','cancelled','exit','pause'])
+        self.survey_area_client = actionlib.SimpleActionClient('survey_area_action', manda_coverage.msg.manda_coverageAction)
+        self.task_complete = False
+
+    def execute(self, userdata):
+        task = self.missionManager.current_task
+        if task is not None:
+            goal = manda_coverage.msg.manda_coverageGoal()
+            for wp in task['nav_objectives'][task['current_nav_objective_index']]['children']:
+                print wp
+                gp = GeoPoint()
+                gp.latitude = wp['latitude']
+                gp.longitude = wp['longitude']
+                goal.area.append(gp)
+            goal.speed = task['default_speed']
+            self.task_complete = False
+            self.survey_area_client.wait_for_server()
+            self.survey_area_client.send_goal(goal, self.survey_area_done_callback, self.survey_area_active_callback, self.survey_area_feedback_callback)
+
+        while self.missionManager.current_task is not None:
+            if rospy.is_shutdown():
+                return 'exit'
+            if self.missionManager.getPilotingMode() != 'autonomous':
+                return 'pause'
+            if self.task_complete:
+                return 'done'
+            self.missionManager.publishStatus('SurveyArea')
+            rospy.sleep(0.1)
+        self.survey_area_client.cancel_goal()
+        return 'cancelled'
+
+    def survey_area_done_callback(self, status, result):
+        self.task_complete = True
+    
+    def survey_area_active_callback(self):
+        pass
+    
+    def survey_area_feedback_callback(self, msg):
+        pass
+    
     
 def main():
     rospy.init_node('MissionManager')
@@ -536,10 +585,11 @@ def main():
             smach.StateMachine.add('IDLE', Idle(missionManager), transitions={'do-task':'NEXTTASK', 'pause':'pause'})
             smach.StateMachine.add('NEXTTASK', NextTask(missionManager), transitions={'idle':'IDLE', 'mission_plan':'MISSIONPLAN', 'hover':'HOVER', 'goto':'GOTO'})
             smach.StateMachine.add('HOVER', Hover(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK'})
-            smach.StateMachine.add('MISSIONPLAN', MissionPlan(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
+            smach.StateMachine.add('MISSIONPLAN', MissionPlan(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH', 'survey_area':'SURVEYAREA'})
             smach.StateMachine.add('GOTO',Goto(missionManager), transitions={'done':'NEXTTASK', 'follow_path':'FOLLOWPATH'})
             smach.StateMachine.add('FOLLOWPATH', FollowPath(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'LINEENDED'})
             smach.StateMachine.add('LINEENDED', LineEnded(missionManager), transitions={'mission_plan': 'MISSIONPLAN', 'next_item':'NEXTTASK'})
+            smach.StateMachine.add('SURVEYAREA', SurveyArea(missionManager), transitions={'pause':'pause', 'cancelled':'NEXTTASK', 'done':'NEXTTASK'})
 
         smach.StateMachine.add('AUTONOMOUS', sm_auto, transitions={'pause':'PAUSE', 'exit':'exit'})
     
