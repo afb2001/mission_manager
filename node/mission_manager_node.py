@@ -503,9 +503,11 @@ class FollowPath(MMState):
                 return 'exit'
             if self.missionManager.getPilotingMode() != 'autonomous':
                 # Path planner does not support being paused
+                print("Mission manager canceling planner")
                 self.path_planner_client.cancel_goal()
                 return 'pause'
             if self.task_complete:
+                print("Mission manager acknowledges line completion")
                 return 'done'
             self.missionManager.publishStatus('FollowPath')
             rospy.sleep(0.1)
@@ -516,6 +518,7 @@ class FollowPath(MMState):
         return 'cancelled'
 
     def path_follower_done_callback(self, status, result):
+        print("Mission manager received completion callback")
         self.task_complete = True
     
     def path_follower_active_callback(self):
