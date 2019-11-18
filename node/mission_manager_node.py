@@ -508,14 +508,18 @@ class FollowPath(MMState):
             if rospy.is_shutdown():
                 return 'exit'
             if self.missionManager.getPilotingMode() != 'autonomous':
+                # Path planner does not support being paused
+                self.path_planner_client.cancel_goal()
                 return 'pause'
             if self.task_complete:
                 return 'done'
             self.missionManager.publishStatus('FollowPath')
             rospy.sleep(0.1)
-        self.path_follower_client.cancel_goal()
+        if self.missionManager.planner == 'path_follower':
+            self.path_follower_client.cancel_goal()
+        elif self.missionManager.planner == 'path_planner':
+            self.path_planner_client.cancel_goal()
         return 'cancelled'
-
 
     def path_follower_done_callback(self, status, result):
         self.task_complete = True
