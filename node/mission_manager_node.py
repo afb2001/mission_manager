@@ -9,6 +9,7 @@ from geographic_msgs.msg import GeoPointStamped
 from marine_msgs.msg import NavEulerStamped
 from marine_msgs.msg import Heartbeat
 from marine_msgs.msg import KeyValue
+from marine_msgs.msg import CourseMadeGoodStamped
 from geographic_msgs.msg import GeoPoseStamped
 from geographic_msgs.msg import GeoPose
 from geographic_msgs.msg import GeoPoint
@@ -36,14 +37,21 @@ class MissionManagerCore:
         self.piloting_mode = 'standby'
         self.position = None
         self.heading = None
+        self.cmg = None
 
         self.tasks = [] # list of tasks to do, or already done. Keeping all the tasks allows us to run them in a loop
-        self.pending_tasks = [] # list of tasks to be done. Once a task is completed, it is dropped from this list. Overrides get prepended here.
+        #self.pending_tasks = [] # list of tasks to be done. Once a task is completed, it is dropped from this list. Overrides get prepended here.
         self.current_task = None
+        self.override_task = None # a task that may be added, such as hover, to to temporarily interupt current tast.
+        self.saved_task = None # a task that was current when an override task was added
+        self.pending_command = None
+        
+        self.done_behavior = 'hover'
         
         rospy.Subscriber('/project11/piloting_mode', String, self.pilotingModeCallback, queue_size = 1)
         rospy.Subscriber('/position', GeoPointStamped, self.positionCallback, queue_size = 1)
         rospy.Subscriber('/heading', NavEulerStamped, self.headingCallback, queue_size = 1)
+        rospy.Subscriber('/cmg', CourseMadeGoodStamped, self.cmgCallback, queue_size = 1)
         rospy.Subscriber('/project11/mission_manager/command', String, self.commandCallback, queue_size = 1)
         
         self.status_publisher = rospy.Publisher('/project11/mission_manager/status', Heartbeat, queue_size = 10)
@@ -58,6 +66,9 @@ class MissionManagerCore:
         
     def headingCallback(self, msg):
         self.heading = msg
+        
+    def cmgCallback(self, msg):
+        self.cmg = msg
 
     def reconfigure_callback(self, config, level):
         self.waypointThreshold = config['waypoint_threshold']
@@ -68,19 +79,16 @@ class MissionManagerCore:
             self.planner = 'path_follower'
         elif config['planner'] == 1:
             self.planner = 'path_planner'
+        if config['done_behavior'] == 0:
+            self.done_behavior = 'hover'
+        elif config['done_behavior'] == 1:
+            self.done_behavior = 'restart'
+            
         return config
         
     def getPilotingMode(self):
         return self.piloting_mode
     
-    def hasPendingTasks(self):
-        if len(self.pending_tasks):
-            return True
-        if len(self.tasks):
-            self.pending_tasks = list(self.tasks)
-            return True
-        return False
-
     def commandCallback(self, msg):
         parts = msg.data.split(None,1)
         cmd = parts[0]
@@ -94,6 +102,7 @@ class MissionManagerCore:
         if cmd == 'replace_task':
             self.clearTasks()
             self.addTask(args)
+            self.pending_command = 'next_task'
             
         if cmd == 'append_task':
             self.addTask(args)
@@ -104,32 +113,9 @@ class MissionManagerCore:
         if cmd == 'clear_tasks':
             self.clearTasks()
             
-        if cmd == 'next_task':
-            self.current_task = None
-        
-        if cmd == 'prev_task':
-            pass
-        
-        if cmd == 'goto_task':
-            pass
+        if cmd in ('next_task','prev_task','goto_task','goto_line', 'start_line', 'restart_mission'):
+            self.pending_command  = msg.data
 
-        if cmd == 'goto_line':
-            task = self.current_task
-            if task is not None and task['type'] == 'mission_plan':
-                task['current_nav_objective_index'] = int(args)
-                task['do_transit'] = False
-                task['current_path'] = None
-                self.pending_tasks = [task]+self.pending_tasks
-                self.current_task = None
-        
-        if cmd == 'start_line':
-            task = self.current_task
-            if task is not None and task['type'] == 'mission_plan':
-                task['current_nav_objective_index'] = int(args)
-                task['do_transit'] = True
-                task['current_path'] = None
-                self.pending_tasks = [task]+self.pending_tasks
-                self.current_task = None
         
         if cmd == 'override':
             parts = args.split(None,1)
@@ -140,12 +126,10 @@ class MissionManagerCore:
                     task = self.parseLatLong(parts[1])
                     if task is not None:
                         task['type'] = 'goto'
-                        task['override'] = True
                 if task_type == 'hover':
                     task = self.parseLatLong(parts[1])
                     if task is not None:
                         task['type'] = 'hover'
-                        task['override'] = True
                 if task is not None:
                     self.setOverride(task)
 
@@ -172,24 +156,14 @@ class MissionManagerCore:
             if task is not None: 
                 if prepend:
                     self.tasks.insert(0,task)
-                    if self.current_task is not None:
-                        self.pending_tasks.insert(0,self.pending_tasks)
-                    self.pending_tasks.insert(0,task)
                 else:
                     self.tasks.append(task)
-                    self.pending_tasks.append(task)
         print 'tasks'
         print self.tasks
-        print 'pending tasks'
-        print self.pending_tasks
 
     def setOverride(self, task):
-        if self.current_task is not None:
-            if not 'override' in self.current_task or not self.current_task['override']:
-                self.pending_tasks.insert(0,self.current_task)
-        self.pending_tasks.insert(0,task)
-        task['override'] = True
-        self.current_task = None
+        self.override_task = task
+        self.pending_command = 'do_override'
         
     def parseLatLong(self,args):
         latlon = args.split()
@@ -287,6 +261,99 @@ class MissionManagerCore:
     
     def headingToYaw(self, heading):
         return 90-heading
+
+    def iterate(self, current_state):
+        if rospy.is_shutdown():
+            return 'exit'
+        if self.getPilotingMode() != 'autonomous':
+            return 'pause'
+        if self.pending_command is not None:
+            return 'cancelled'
+        self.publishStatus(current_state)
+        rospy.sleep(0.1)
+
+    def nextTask(self):
+        if self.pending_command is not None:
+            print 'nextTask: pending_command:',self.pending_command
+        if self.pending_command == 'do_override':
+            self.saved_task = self.current_task
+            self.pending_command = None
+            return
+        
+        if self.override_task is not None:
+            self.current_task = self.saved_task
+            self.override_task = None
+            if self.pending_command == 'next_task':
+                self.pending_command = None
+                return
+
+        if self.pending_command == 'restart_mission' and len(self.tasks):
+            for t in self.tasks:
+                if t['type'] == 'mission_plan':
+                    t['current_nav_objective_index'] = None
+                    t['current_path'] = None
+            self.current_task = self.tasks[0]
+
+        if self.pending_command in ('next_task','prev_task'):
+            if len(self.tasks):
+                if self.current_task is None:
+                    if self.pending_command == 'next_task':
+                        self.current_task = self.tasks[0]
+                    if self.pending_command == 'prev_task':
+                        self.current_task = self.tasks[-1]
+                else:
+                    try:
+                        i = self.tasks.index(self.current_task)
+                        print 'nextTask: current task index:',i
+                        if self.pending_command == 'next_task':
+                            i += 1
+                            if i >= len(self.tasks):
+                                self.current_task = None
+                            else:
+                                self.current_task = self.tasks[i]
+                        if self.pending_command == 'prev_task':
+                            i -= 1
+                            if i < 0:
+                                self.current_task = None
+                            else:
+                                self.current_task = self.tasks[i]
+                    except ValueError:
+                        print "nextTask: can't find current task index!"
+                        self.current_task = None
+                    if self.current_task is None: #end of the list or error figuring out where in the list we were.
+                        if self.done_behavior == 'restart':
+                            self.current_task = self.tasks[0]
+                        elif self.done_behavior == 'hover':
+                            self.current_task = {'type':'hover'}
+                            self.current_task['latitude'] = self.position.position.latitude
+                            self.current_task['longitude'] = self.position.position.longitude
+                if self.current_task is not None and self.current_task['type'] == 'mission_plan':
+                    self.current_task['current_nav_objective_index'] = None
+                    self.current_task['current_path'] = None
+
+                    
+        if self.current_task is not None and self.current_task['type'] == 'mission_plan' and (self.pending_command.startswith('goto_line') or self.pending_command.startswith('start_line')):
+            parts = self.pending_command.strip().split(None,1)
+            if len(parts) == 2:
+                cmd = parts[0]
+                line_no = int(parts[1])
+                if line_no >= 0 and line_no < len(self.current_task['nav_objectives']):
+                    self.current_task['current_nav_objective_index'] = line_no
+                    self.current_task['current_path'] = None
+                    if cmd == 'goto_line':
+                        self.current_task['do_transit'] = False
+                    if cmd == 'start_line':
+                        self.current_task['do_transit'] = True
+                
+        
+        self.pending_command = None
+
+    def getCurrentTask(self):
+        if self.override_task is not None:
+            return self.override_task
+            
+        return self.current_task
+
     
     def publishStatus(self, state):
         hb = Heartbeat()
@@ -299,13 +366,6 @@ class MissionManagerCore:
             if t['type'] == 'mission_plan':
                 tstring += ' ('+t['label']+')'
             hb.values.append(KeyValue('-task',tstring))
-
-        hb.values.append(KeyValue('pending_tasks_count',str(len(self.pending_tasks))))
-        for t in self.pending_tasks:
-            tstring = t['type']
-            if t['type'] == 'mission_plan':
-                tstring += ' ('+t['label']+')'
-            hb.values.append(KeyValue('-pending task',tstring))
 
         if self.current_task is None:
             hb.values.append(KeyValue('current_task','None'))
@@ -348,14 +408,14 @@ class Idle(MMState):
         MMState.__init__(self, mm, outcomes=['exit','do-task','pause'])
         
     def execute(self, userdata):
-        while not self.missionManager.hasPendingTasks():
-            if rospy.is_shutdown():
-                return 'exit'
-            if self.missionManager.getPilotingMode() != 'autonomous':
-                return 'pause'
-            self.missionManager.publishStatus('Idle')
-            rospy.sleep(0.1)
-        return 'do-task'
+        while True:
+            ret = self.missionManager.iterate('Idle')
+            if ret == 'cancelled':
+                return 'do-task'
+            if ret is not None:
+                return ret
+            if len(self.missionManager.tasks) != 0:
+                return 'do-task'
 
 
 class NextTask(MMState):
@@ -363,10 +423,10 @@ class NextTask(MMState):
         MMState.__init__(self, mm, outcomes=['idle','mission_plan','goto','hover'])
         
     def execute(self, userdata):
-        self.missionManager.current_task = None
-        if len(self.missionManager.pending_tasks):
-            self.missionManager.current_task = self.missionManager.pending_tasks[0]
-            self.missionManager.pending_tasks = self.missionManager.pending_tasks[1:]
+        self.missionManager.nextTask()
+        if self.missionManager.override_task is not None:
+            return self.missionManager.override_task['type']
+        if self.missionManager.current_task is not None:
             return self.missionManager.current_task['type']
         return 'idle'
 
@@ -376,29 +436,26 @@ class Hover(MMState):
         self.hover_client = actionlib.SimpleActionClient('hover_action', hover.msg.hoverAction)
         
     def execute(self, userdata):
-        if self.missionManager.current_task is not None:
-            task = self.missionManager.current_task
+        task = self.missionManager.getCurrentTask()
+        if task is not None:
             goal = hover.msg.hoverGoal()
             goal.target.latitude = task['latitude']
             goal.target.longitude = task['longitude']
             self.hover_client.wait_for_server()
             self.hover_client.send_goal(goal)
-        while self.missionManager.current_task is not None:
-            if rospy.is_shutdown():
-                return 'exit'
-            if self.missionManager.getPilotingMode() != 'autonomous':
-                return 'pause'
-            self.missionManager.publishStatus('Hover')
-            rospy.sleep(0.1)
-        self.hover_client.cancel_goal()
-        return 'cancelled'
+        while True:
+            ret = self.missionManager.iterate('Hover')
+            if ret is not None:
+                if ret == 'cancelled':
+                    self.hover_client.cancel_goal()
+                return ret
 
 class LineEnded(MMState):
     def __init__(self,mm):
         MMState.__init__(self, mm, outcomes=['mission_plan','next_item'])
 
     def execute(self, userdata):
-        task = self.missionManager.current_task
+        task = self.missionManager.getCurrentTask()
         if task is not None and task['type'] == 'mission_plan':
             if task['transit_path'] is not None:
                 task['transit_path'] = None
@@ -406,6 +463,7 @@ class LineEnded(MMState):
                 task['current_path'] = None
                 task['current_nav_objective_index'] += 1
             return 'mission_plan'
+        self.missionManager.pending_command = 'next_task'
         return 'next_item'
 
         
@@ -420,6 +478,7 @@ class MissionPlan(MMState):
                 task['current_nav_objective_index'] = 0
             if task['current_nav_objective_index'] >= len(task['nav_objectives']):
                 task['current_nav_objective_index'] = None
+                self.missionManager.pending_command = 'next_task'
                 return 'done'
             if task['nav_objectives'][task['current_nav_objective_index']]['type'] == 'SurveyArea':
                 return 'survey_area'
@@ -454,10 +513,10 @@ class Goto(MMState):
         MMState.__init__(self, mm, outcomes=['done','follow_path'])
         
     def execute(self, userdata):
-        task = self.missionManager.current_task
+        task = self.missionManager.getCurrentTask()
         if task is not None:
             if self.missionManager.distanceTo(task['latitude'],task['longitude']) <= self.missionManager.waypointThreshold:
-                self.missionManager.current_task = None
+                self.missionManager.pending_command = 'next_task'
                 return 'done'
             
             headingToPoint = self.missionManager.headingToPoint(task['latitude'],task['longitude'])
@@ -504,22 +563,17 @@ class FollowPath(MMState):
                 self.path_planner_client.wait_for_server()
                 self.path_planner_client.send_goal(goal, self.path_follower_done_callback, self.path_follower_active_callback, self.path_follower_feedback_callback)
 
-        while self.missionManager.current_task is not None:
-            if rospy.is_shutdown():
-                return 'exit'
-            if self.missionManager.getPilotingMode() != 'autonomous':
-                # Path planner does not support being paused
-                self.path_planner_client.cancel_goal()
-                return 'pause'
+        while True:
+            ret = self.missionManager.iterate('FollowPath')
+            if ret is not None:
+                if ret == 'cancelled':
+                    if self.missionManager.planner == 'path_follower':
+                        self.path_follower_client.cancel_goal()
+                    elif self.missionManager.planner == 'path_planner':
+                        self.path_planner_client.cancel_goal()
+                return ret
             if self.task_complete:
                 return 'done'
-            self.missionManager.publishStatus('FollowPath')
-            rospy.sleep(0.1)
-        if self.missionManager.planner == 'path_follower':
-            self.path_follower_client.cancel_goal()
-        elif self.missionManager.planner == 'path_planner':
-            self.path_planner_client.cancel_goal()
-        return 'cancelled'
 
     def path_follower_done_callback(self, status, result):
         self.task_complete = True
@@ -551,17 +605,14 @@ class SurveyArea(MMState):
             self.survey_area_client.wait_for_server()
             self.survey_area_client.send_goal(goal, self.survey_area_done_callback, self.survey_area_active_callback, self.survey_area_feedback_callback)
 
-        while self.missionManager.current_task is not None:
-            if rospy.is_shutdown():
-                return 'exit'
-            if self.missionManager.getPilotingMode() != 'autonomous':
-                return 'pause'
+        while True:
+            ret = self.missionManager.iterate('SurveyArea')
+            if ret is not None:
+                if ret == 'cancelled':
+                    self.survey_area_client.cancel_goal()
+                return ret
             if self.task_complete:
                 return 'done'
-            self.missionManager.publishStatus('SurveyArea')
-            rospy.sleep(0.1)
-        self.survey_area_client.cancel_goal()
-        return 'cancelled'
 
     def survey_area_done_callback(self, status, result):
         self.task_complete = True
