@@ -276,6 +276,8 @@ class MissionManagerCore:
         if self.pending_command is not None:
             print 'nextTask: pending_command:',self.pending_command
         if self.pending_command == 'do_override':
+            if self.current_task is not None and self.current_task['type'] == 'mission_plan':
+                self.current_task['current_path'] = None
             self.saved_task = self.current_task
             self.pending_command = None
             return
@@ -533,7 +535,7 @@ class FollowPath(MMState):
         self.task_complete = False
         
     def execute(self, userdata):
-        task = self.missionManager.current_task
+        task = self.missionManager.getCurrentTask()
         if task is not None:
             if self.missionManager.planner == 'path_follower':
                 goal = path_follower.msg.path_followerGoal()
